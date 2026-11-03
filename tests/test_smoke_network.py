@@ -6,8 +6,10 @@ NBA.com changes or removes endpoints without notice, so each endpoint we depend 
 import pytest
 from nba_api.stats.endpoints import LeagueDashPlayerStats, LeagueGameLog
 
+from sportslab.data.awards import award_labels, load_player_awards
 from sportslab.data.client import NbaClient
 from sportslab.data.lineups import load_lineups, load_team_ratings
+from sportslab.data.player_season import load_player_season
 from sportslab.data.players import clean_player_stats
 from sportslab.data.profiles import load_per100, load_shot_zones
 from sportslab.data.schedule import (
@@ -94,3 +96,16 @@ def test_schedule_conferences_and_playoff_results_for_a_finished_season(tmp_path
     assert len(outcome["made_playoffs"]) == 16 and len(outcome["finalists"]) == 2
     boston = int(conferences.loc[conferences["team"] == "Celtics", "team_id"].iloc[0])
     assert outcome["champion"] == boston  # the 2023-24 champions
+
+
+def test_awards_and_cutoff_player_stats(tmp_path):
+    from datetime import date
+
+    client = NbaClient(cache_dir=tmp_path, timeout=60)
+    awards = load_player_awards(client, 203999)  # Jokic: MVP 2020-21, 2021-22, 2023-24
+    labels = award_labels(awards).set_index("season")
+    assert bool(labels.loc["2020-21", "mvp"]) and bool(labels.loc["2023-24", "all_star"])
+    stats = load_player_season(client, "2023-24", date(2024, 1, 15))
+    assert len(stats) > 400 and stats["team_w_pct"].notna().all()
+    assert stats["gp"].max() < 50  # through mid-January, not the whole season
+    assert 25 < stats["pts"].max() < 40
