@@ -18,7 +18,7 @@ st.markdown(
 | 3 | Comparador de jugadores (radar de percentiles) | **listo** |
 | 4 | Clustering de roles (con pruebas de validez) | **listo** |
 | 5 | Subvalorados | pendiente |
-| 6 | Simulador de temporada y playoffs | pendiente |
+| 6 | Simulador de temporada y playoffs (con backtest) | **listo** |
 | 7 | Análisis de lineups (con incertidumbre y persistencia) | **listo** |
 | 8 | Predictor de MVP / All-Star | pendiente |
 | 9 | Dashboard diario | pendiente |
