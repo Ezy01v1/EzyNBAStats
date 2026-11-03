@@ -17,7 +17,7 @@ st.markdown(
 | 2 | Shot charts (zonas, dónde vs. cómo) | **listo** |
 | 3 | Comparador de jugadores (radar de percentiles) | **listo** |
 | 4 | Clustering de roles (con pruebas de validez) | **listo** |
-| 5 | Subvalorados | **código listo**; necesita tu CSV de salarios |
+| 5 | Subvalorados (salario vs. producción) | **listo con 2022-23** (el CSV no cubre más) |
 | 6 | Simulador de temporada y playoffs (con backtest) | **listo** |
 | 7 | Análisis de lineups (con incertidumbre y persistencia) | **listo** |
 | 8 | Predictor de All-Star / All-NBA y ranking de MVP | **listo** |

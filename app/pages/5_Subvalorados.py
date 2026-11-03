@@ -19,7 +19,7 @@ from sportslab.analysis.value import (
 )
 from sportslab.config import DATA_DIR
 from sportslab.data import NbaClient, NbaClientError
-from sportslab.data.players import load_player_stats
+from sportslab.data.players import add_experience, load_career_start, load_player_stats
 from sportslab.data.salaries import OPTIONAL, REQUIRED, match_salaries, read_salaries
 
 SALARY_FILE = DATA_DIR / "external" / "salaries.csv"
@@ -36,7 +36,8 @@ st.caption(
 
 @st.cache_data(show_spinner="Cargando estadísticas de jugadores…")
 def get_players(season: str) -> pd.DataFrame:
-    return load_player_stats(NbaClient(), [season])
+    client = NbaClient()
+    return add_experience(load_player_stats(client, [season]), load_career_start(client))
 
 
 st.markdown(
@@ -64,19 +65,49 @@ except ValueError as exc:
     st.stop()
 
 seasons = sorted(salaries["season"].unique(), reverse=True)
-season = st.sidebar.selectbox("Temporada", seasons)
+
+
+@st.cache_data(show_spinner="Midiendo cuánto del CSV cruza con cada temporada…")
+def coverage_by_season(salary_table: pd.DataFrame) -> dict[str, float]:
+    """Share of rotation players (>= 1000 min) that have a salary in the CSV, per season."""
+    out = {}
+    for s in sorted(salary_table["season"].unique()):
+        players = get_players(s)
+        matched = match_salaries(salary_table[salary_table["season"] == s], players)[0]
+        out[s] = float(
+            (matched["minutes"] >= MIN_MINUTES).sum() / (players["minutes"] >= MIN_MINUTES).sum()
+        )
+    return out
+
+
+try:
+    coverage = coverage_by_season(salaries)
+except NbaClientError as exc:
+    st.error("No pude descargar las estadísticas de jugadores y no están en la caché.")
+    st.code(str(exc))
+    st.stop()
+best_season = max(coverage, key=coverage.get)
+season = st.sidebar.selectbox(
+    "Temporada",
+    seasons,
+    index=seasons.index(best_season),
+    format_func=lambda s: f"{s} (cubre {coverage[s]:.0%} de la rotación)",
+)
+if coverage[season] < 0.9:
+    st.error(
+        f"El CSV solo trae salario para {coverage[season]:.0%} de los jugadores de rotación de "
+        f"{season}: faltan sobre todo contratos firmados después de que se recogieron los datos, "
+        "así que el mercado estimado estaría sesgado. Elige una temporada con cobertura ≥ 90 % "
+        f"(mejor: {best_season}) o un CSV más completo."
+    )
+    st.stop()
 rookie_control = st.sidebar.checkbox(
     "Controlar por contrato de novato",
     value=True,
     help="Los contratos de novato están fijados por el convenio, no por el mercado. Sin "
     "controlarlos, la lista de 'subvalorados' se llena de novatos.",
 )
-uses_experience = "years_experience" in salaries and salaries["years_experience"].notna().all()
-st.sidebar.caption(
-    "Novato = hasta 3 años de experiencia (columna del CSV)."
-    if uses_experience
-    else "Sin la columna `years_experience`, novato se aproxima por edad ≤ 22 (burdo)."
-)
+st.sidebar.caption("Novato = hasta 3 temporadas desde su debut (datos de NBA.com).")
 
 try:
     players = get_players(season)
@@ -103,7 +134,7 @@ tab_gap, tab_market, tab_match, tab_gloss = st.tabs(
 )
 
 with tab_gap:
-    cheap = scored.nsmallest(15, "ratio")
+    cheap = scored.nsmallest(15, "gap_z")
     fig = go.Figure(
         go.Scatter(
             x=cheap["ratio"].iloc[::-1],
@@ -119,18 +150,18 @@ with tab_gap:
         )
     )
     fig.add_vline(x=1, line_dash="dash")
-    clear = int((scored["ratio_high"] < 1).sum())
+    below, above = int((scored["gap_z"] < -2).sum()), int((scored["gap_z"] > 2).sum())
     fig.update_layout(
-        title=f"{cheap['player'].iloc[0]} cobra {cheap['ratio'].iloc[0]:.0%} de lo que paga el "
-        f"mercado por su producción; {clear} de {len(scored)} tienen un intervalo bajo 100 %",
-        xaxis_title="salario real / salario de mercado (barras = IC 95 % de la línea de mercado)",
+        title=f"{below} de {len(scored)} jugadores cobran claramente menos que el mercado y "
+        f"{above} claramente más (a más de 2 desviaciones de la brecha habitual)",
+        xaxis_title="salario real / salario de mercado (barras = incertidumbre de la línea)",
         height=140 + 30 * len(cheap),
         margin={"l": 240},
     )
     st.plotly_chart(fig, width="stretch")
     view = scored[
-        ["player", "team", "age", "minutes", "pie", "salary_usd", "market_salary", "ratio"]
-    ].sort_values("ratio")
+        ["player", "team", "age", "minutes", "pie", "salary_usd", "market_salary", "ratio", "gap_z"]
+    ].sort_values("gap_z")
     st.dataframe(
         view.rename(
             columns={
@@ -142,6 +173,7 @@ with tab_gap:
                 "salary_usd": "salario",
                 "market_salary": "salario de mercado",
                 "ratio": "real / mercado",
+                "gap_z": "desviaciones",
             }
         ),
         width="stretch",
@@ -150,12 +182,13 @@ with tab_gap:
             "salario": st.column_config.NumberColumn(format="$%d"),
             "salario de mercado": st.column_config.NumberColumn(format="$%d"),
             "real / mercado": st.column_config.NumberColumn(format="%.2f"),
+            "desviaciones": st.column_config.NumberColumn(format="%.1f"),
         },
     )
     st.caption(
-        "El intervalo recoge la incertidumbre de la línea de mercado pero NO el ruido del PIE: "
-        "una buena temporada puntual parece 'subvalorada'. Mira si se repite en otras temporadas "
-        "(pestaña 'El mercado')."
+        "Las barras recogen solo la incertidumbre de la línea de mercado, no el ruido del PIE ni "
+        "las lesiones: PIE × minutos hace parecer 'sobrepagado' a quien se lesionó. 'Desviaciones' "
+        "compara la brecha con la habitual entre jugadores: es mejor guía que el intervalo."
     )
 
 with tab_market:
@@ -195,14 +228,25 @@ with tab_market:
         other = st.selectbox("Comparar con otra temporada", others)
         a, b = (other, season) if other < season else (season, other)
         try:
-            first = match_salaries(salaries[salaries["season"] == a], get_players(a))[0]
-            second = match_salaries(salaries[salaries["season"] == b], get_players(b))[0]
-            rho, low, high, n = gap_persistence(first, second, rookie_control=rookie_control)
-            st.markdown(
-                f"**¿Siguen subvalorados?** Correlación de la brecha salario-mercado entre {a} y "
-                f"{b} (mismos {n} jugadores): **{rho:+.2f}** [{low:+.2f}, {high:+.2f}]. Cerca de 0 "
-                "significaría que 'subvalorado' era ruido de una temporada."
-            )
+            pa, pb = get_players(a), get_players(b)
+            first = match_salaries(salaries[salaries["season"] == a], pa)[0]
+            second = match_salaries(salaries[salaries["season"] == b], pb)[0]
+            cov_a = (first["minutes"] >= MIN_MINUTES).sum() / (pa["minutes"] >= MIN_MINUTES).sum()
+            cov_b = (second["minutes"] >= MIN_MINUTES).sum() / (pb["minutes"] >= MIN_MINUTES).sum()
+            if min(cov_a, cov_b) < 0.9:
+                st.warning(
+                    f"El CSV solo trae salario para {cov_a:.0%} ({a}) y {cov_b:.0%} ({b}) de los "
+                    "jugadores de rotación: la comparación estaría sesgada (faltan sobre todo los "
+                    "contratos firmados después). No la calculo."
+                )
+            else:
+                rho, low, high, n = gap_persistence(first, second, rookie_control=rookie_control)
+                st.markdown(
+                    f"**¿Siguen subvalorados?** Correlación de la brecha salario-mercado entre {a} "
+                    f"y {b} (mismos {n} jugadores): **{rho:+.2f}** [{low:+.2f}, {high:+.2f}]. Ojo: "
+                    "los contratos son plurianuales, así que el salario casi no cambia y parte de "
+                    "esta correlación es mecánica."
+                )
         except NbaClientError:
             st.info("No pude cargar la otra temporada.")
     st.caption(
@@ -212,7 +256,8 @@ with tab_market:
 
 with tab_match:
     st.markdown("**Filas del CSV que no encontraron jugador** (revisa ortografía o equipo):")
-    st.dataframe(csv_left[["player_name", "team", "salary_usd"]].head(100), width="stretch")
+    shown = [c for c in ("player_name", "team", "salary_usd") if c in csv_left.columns]
+    st.dataframe(csv_left[shown].head(100), width="stretch")
     st.markdown("**Jugadores de rotación sin salario en el CSV:**")
     st.dataframe(pool_left[["player", "team", "minutes"]].head(100), width="stretch")
 
