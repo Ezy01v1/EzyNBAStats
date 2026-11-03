@@ -39,14 +39,22 @@ def calibration_table(y_true: np.ndarray, p: np.ndarray, n_bins: int = 10) -> pd
     bins = np.minimum((p * n_bins).astype(int), n_bins - 1)
     df = pd.DataFrame({"bin": bins, "y": np.asarray(y_true, dtype=float), "p": p})
     table = df.groupby("bin").agg(n=("y", "size"), mean_pred=("p", "mean"), observed=("y", "mean"))
-    z = 1.96
-    n, rate = table["n"], table["observed"]
-    denom = 1 + z**2 / n
-    center = (rate + z**2 / (2 * n)) / denom
-    half = z * np.sqrt(rate * (1 - rate) / n + z**2 / (4 * n**2)) / denom
-    table["ci_low"] = center - half
-    table["ci_high"] = center + half
+    table["ci_low"], table["ci_high"] = wilson_interval(table["observed"] * table["n"], table["n"])
     return table.reset_index()
+
+
+def wilson_interval(successes, n, z: float = 1.96):
+    """95% Wilson score interval for a proportion (works for small n and rates near 0 or 1).
+
+    Accepts scalars or arrays/Series; ``n == 0`` yields the uninformative interval (nan, nan).
+    """
+    n = np.asarray(n, dtype=float) if not isinstance(n, pd.Series) else n.astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rate = successes / n
+        denom = 1 + z**2 / n
+        center = (rate + z**2 / (2 * n)) / denom
+        half = z * np.sqrt(rate * (1 - rate) / n + z**2 / (4 * n**2)) / denom
+    return center - half, center + half
 
 
 def paired_log_loss_gain(

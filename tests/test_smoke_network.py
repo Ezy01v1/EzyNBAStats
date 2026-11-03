@@ -8,6 +8,7 @@ from nba_api.stats.endpoints import LeagueDashPlayerStats, LeagueGameLog
 
 from sportslab.data.client import NbaClient
 from sportslab.data.players import clean_player_stats
+from sportslab.data.shots import load_player_shots
 
 pytestmark = pytest.mark.network
 
@@ -38,3 +39,13 @@ def test_league_dash_player_stats_advanced_2023_24(tmp_path):
     assert players["PLAYER_ID"].is_unique and len(players) > 400
     # clean_player_stats raises if MIN stops being per-game (possessions-per-minute check)
     assert clean_player_stats(players, "2023-24")["minutes"].max() > 2000
+
+
+def test_shot_chart_detail_for_one_player_season(tmp_path):
+    client = NbaClient(cache_dir=tmp_path, timeout=60)
+    shots, league = load_player_shots(client, player_id=203999, season="2023-24")  # Jokic
+    assert 800 < len(shots) < 1600 and shots["made"].isin([0, 1]).all()
+    assert shots["points"].isin([2, 3]).all()
+    # the league zone totals cover every shot of the season: ~200k attempts
+    assert 150_000 < league["fga"].sum() < 260_000
+    assert {"Restricted Area", "Mid-Range", "Left Corner 3"} <= set(league["zone_basic"])
