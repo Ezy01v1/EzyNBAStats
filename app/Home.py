@@ -15,7 +15,7 @@ st.markdown(
 |---|---|---|
 | 1 | Predictor de resultados (Elo, logística, XGBoost) | **Elo listo**; faltan los otros dos |
 | 2 | Shot charts | pendiente |
-| 3 | Comparador de jugadores | pendiente |
+| 3 | Comparador de jugadores (radar de percentiles) | **listo** |
 | 4 | Clustering de roles | pendiente |
 | 5 | Subvalorados | pendiente |
 | 6 | Simulador de temporada y playoffs | pendiente |
