@@ -8,6 +8,7 @@ from nba_api.stats.endpoints import LeagueDashPlayerStats, LeagueGameLog
 
 from sportslab.data.client import NbaClient
 from sportslab.data.players import clean_player_stats
+from sportslab.data.profiles import load_per100, load_shot_zones
 from sportslab.data.shots import load_player_shots
 
 pytestmark = pytest.mark.network
@@ -49,3 +50,13 @@ def test_shot_chart_detail_for_one_player_season(tmp_path):
     # the league zone totals cover every shot of the season: ~200k attempts
     assert 150_000 < league["fga"].sum() < 260_000
     assert {"Restricted Area", "Mid-Range", "Left Corner 3"} <= set(league["zone_basic"])
+
+
+def test_player_style_tables_cover_the_same_players(tmp_path):
+    client = NbaClient(cache_dir=tmp_path, timeout=60)
+    per100 = load_per100(client, "2023-24")
+    zones = load_shot_zones(client, "2023-24")
+    assert len(per100) > 400 and per100["player_id"].is_unique
+    assert set(zones["player_id"]) <= set(per100["player_id"])
+    assert (zones[["ra_fga", "mid_fga", "atb3_fga"]] >= 0).all().all()
+    assert 40 < per100["fga100"].median() * 3 < 100  # sanity: ~per-100 scale, not per game
