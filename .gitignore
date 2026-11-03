@@ -19,3 +19,7 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+
+# Salary files you provide (licensing is yours to check): never commit
+data/external/*
+!data/external/README.md
