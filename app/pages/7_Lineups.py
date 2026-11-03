@@ -253,7 +253,8 @@ with tab_gloss:
 **Net rating** = puntos anotados menos recibidos por 100 posesiones con ese lineup en cancha.
 
 **Error de muestreo.** Un partido (~100 posesiones) tiene un margen con desviación de ~16 puntos.
-Medido sobre *n* posesiones, el error estándar es ~16 × √(100 / n): 5 con 1000 posesiones, 10 con 250.
+Medido sobre *n* posesiones, el error estándar es ~16 × √(100 / n): 5 con 1000 posesiones,
+10 con 250.
 La banda de 95 % es ±1,96 veces ese error. Se calcula con los márgenes reales de la temporada y
 algo exagera el ruido (incluye diferencias reales entre equipos).
 
