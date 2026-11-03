@@ -18,6 +18,7 @@ GAME_COLUMNS = [
     "home_pts",
     "away_pts",
     "home_win",
+    "neutral_site",
 ]
 
 
@@ -28,6 +29,17 @@ def team_logs_to_games(log: pd.DataFrame, season: str) -> pd.DataFrame:
     "BOS vs. NYK"; the visitor's reads "NYK @ BOS".
     """
     is_home = log["MATCHUP"].str.contains(" vs. ", regex=False)
+    by_game = log["GAME_ID"]
+    n_home_rows = is_home.groupby(by_game).transform("sum")
+    if (n_home_rows > 1).any():
+        raise ValueError("Found a game where both teams are marked as home.")
+    # Neutral-site games (e.g. played abroad) mark BOTH teams "@": there is no real home team.
+    # Keep the game (it is real information), flag it, and label the lower TEAM_ID as "home".
+    neutral = n_home_rows == 0
+    is_home = is_home | (
+        neutral & (log["TEAM_ID"] == log["TEAM_ID"].groupby(by_game).transform("min"))
+    )
+    neutral_ids = set(log.loc[neutral, "GAME_ID"])
     cols = ["GAME_ID", "TEAM_ID", "TEAM_ABBREVIATION", "PTS"]
     home = log.loc[is_home, [*cols, "GAME_DATE"]].rename(
         columns={
@@ -47,6 +59,7 @@ def team_logs_to_games(log: pd.DataFrame, season: str) -> pd.DataFrame:
     games = games.rename(columns={"GAME_ID": "game_id", "GAME_DATE": "game_date"})
     games["game_date"] = pd.to_datetime(games["game_date"])
     games["season"] = season
+    games["neutral_site"] = games["game_id"].isin(neutral_ids)
     games["home_win"] = (games["home_pts"] > games["away_pts"]).astype(int)
     return games[GAME_COLUMNS].sort_values(["game_date", "game_id"]).reset_index(drop=True)
 

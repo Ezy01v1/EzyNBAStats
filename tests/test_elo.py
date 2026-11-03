@@ -19,6 +19,13 @@ def test_400_points_is_ten_to_one_odds():
     assert expected_home_win(1900, 1500, 0) == pytest.approx(10 / 11)
 
 
+def test_neutral_site_game_gets_no_home_advantage():
+    games = _games([("2023-24", 1, 2, 1)])
+    games["neutral_site"] = True
+    out = run_elo(games, EloParams(home_advantage=100))
+    assert out["p_home"].iloc[0] == pytest.approx(0.5)
+
+
 def test_home_advantage_favors_home_team():
     assert expected_home_win(1500, 1500, 100) > 0.5
 

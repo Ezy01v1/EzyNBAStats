@@ -44,14 +44,16 @@ def run_elo(games: pd.DataFrame, params: EloParams | None = None) -> pd.DataFram
     elo_away = [0.0] * n
     p_home = [0.0] * n
 
+    neutral = games["neutral_site"] if "neutral_site" in games else [False] * n
     rows = zip(
         games["season"],
         games["home_team_id"],
         games["away_team_id"],
         games["home_win"],
+        neutral,
         strict=True,
     )
-    for i, (season, home, away, home_win) in enumerate(rows):
+    for i, (season, home, away, home_win, is_neutral) in enumerate(rows):
         if season != current_season:
             if current_season is not None:
                 for team, rating in ratings.items():
@@ -60,7 +62,7 @@ def run_elo(games: pd.DataFrame, params: EloParams | None = None) -> pd.DataFram
 
         r_home = ratings.get(home, params.initial)
         r_away = ratings.get(away, params.initial)
-        p = expected_home_win(r_home, r_away, params.home_advantage)
+        p = expected_home_win(r_home, r_away, 0.0 if is_neutral else params.home_advantage)
         elo_home[i], elo_away[i], p_home[i] = r_home, r_away, p
 
         delta = params.k * (home_win - p)
@@ -72,6 +74,15 @@ def run_elo(games: pd.DataFrame, params: EloParams | None = None) -> pd.DataFram
     out["elo_away_pre"] = elo_away
     out["p_home"] = p_home
     return out
+
+
+def scoring_games(games: pd.DataFrame, seasons: Iterable[str]) -> pd.DataFrame:
+    """Games used to judge a model: the given seasons, excluding neutral-site games (their
+    "home" label is arbitrary, so they say nothing about home-court prediction)."""
+    mask = games["season"].isin(list(seasons))
+    if "neutral_site" in games:
+        mask &= ~games["neutral_site"]
+    return games[mask]
 
 
 def tune_elo(
@@ -91,7 +102,7 @@ def tune_elo(
     for k, h, c in itertools.product(ks, home_advantages, carryovers):
         params = replace(EloParams(), k=k, home_advantage=h, carryover=c)
         out = run_elo(games, params)
-        scored = out[out["season"].isin(score_seasons)]
+        scored = scoring_games(out, score_seasons)
         rows.append(
             {
                 "k": k,

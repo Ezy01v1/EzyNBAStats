@@ -37,5 +37,30 @@ def test_scores_and_home_win():
     assert games.loc["002", "home_win"] == 1  # NYK (home) won game 002
 
 
+def test_neutral_site_game_has_no_real_home_team():
+    # Both rows say "@" (e.g. a game played in Mexico City): there is no home team.
+    log = pd.concat(
+        [
+            _log(),
+            pd.DataFrame(
+                {
+                    "GAME_ID": ["003", "003"],
+                    "TEAM_ID": [30, 40],
+                    "TEAM_ABBREVIATION": ["MIA", "WAS"],
+                    "GAME_DATE": ["2024-01-04", "2024-01-04"],
+                    "MATCHUP": ["MIA @ WAS", "WAS @ MIA"],
+                    "WL": ["W", "L"],
+                    "PTS": [118, 98],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+    games = team_logs_to_games(log, season="2023-24").set_index("game_id")
+    assert list(games["neutral_site"]) == [False, False, True]
+    assert games.loc["003", "home_win"] in (0, 1)  # label is arbitrary, but row is kept
+    assert games.loc["003", "home_pts"] + games.loc["003", "away_pts"] == 216
+
+
 def test_season_label_is_attached():
     assert set(team_logs_to_games(_log(), season="2023-24")["season"]) == {"2023-24"}
