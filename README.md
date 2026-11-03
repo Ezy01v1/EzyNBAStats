@@ -24,3 +24,13 @@ python -m uv run streamlit run app/Home.py
 python -m uv run jupyter lab         # notebooks/01_elo_predictor.ipynb
 python -m uv run python scripts/elo_experiment.py
 ```
+
+## Run the API (local, read-only)
+
+```bash
+python -m uv run uvicorn sportslab.service.api:app --host 127.0.0.1 --port 8000
+```
+
+Docs and design limits (localhost only, no auth, connects to nothing else) in
+[docs/api.md](docs/api.md).
+
