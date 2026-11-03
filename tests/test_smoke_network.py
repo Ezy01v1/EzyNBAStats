@@ -129,3 +129,21 @@ def test_player_game_log_has_fantasy_points_for_a_whole_season(tmp_path):
     assert set(games["home"]) == {True, False} and games["opponent"].str.len().eq(3).all()
     jokic = games[games["player_id"] == 203999]
     assert 60 < len(jokic) <= 82 and jokic["fantasy"].mean() > 40
+
+
+def test_api_serves_real_data_for_the_season_in_progress():
+    from fastapi.testclient import TestClient
+
+    from sportslab.service.api import create_app, get_service
+    from sportslab.service.context import DataService
+
+    service = DataService()
+    app = create_app()
+    app.dependency_overrides[get_service] = lambda: service
+    http = TestClient(app)
+    meta = http.get("/v1/meta").json()
+    assert meta["season"] and meta["data_as_of"]
+    ratings = http.get("/v1/ratings").json()
+    assert len(ratings) == 30 and ratings[0]["elo"] > ratings[-1]["elo"]
+    sim = http.get("/v1/simulation", params={"n_sims": 500}).json()
+    assert abs(sum(t["p_champion"] for t in sim["teams"]) - 1) < 1e-6
