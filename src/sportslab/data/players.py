@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 
 import pandas as pd
-from nba_api.stats.endpoints import LeagueDashPlayerStats
+from nba_api.stats.endpoints import CommonAllPlayers, LeagueDashPlayerStats
 
 from sportslab.data.client import NbaClient
 
@@ -75,3 +75,23 @@ def load_player_stats(
         )
         frames.append(clean_player_stats(raw, season))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=PLAYER_COLUMNS)
+
+
+def load_career_start(client: NbaClient) -> pd.DataFrame:
+    """player_id and ``from_year`` (start year of the first season) of every player ever."""
+    (raw,) = client.fetch(
+        CommonAllPlayers, is_only_current_season=0, league_id="00", season="2022-23"
+    )
+    out = raw[["PERSON_ID", "FROM_YEAR"]].rename(
+        columns={"PERSON_ID": "player_id", "FROM_YEAR": "from_year"}
+    )
+    out["from_year"] = pd.to_numeric(out["from_year"], errors="coerce")
+    return out.dropna().astype(int).reset_index(drop=True)
+
+
+def add_experience(players: pd.DataFrame, career: pd.DataFrame) -> pd.DataFrame:
+    """Add ``years_experience`` = seasons since the player's first one (0 = rookie season)."""
+    out = players.merge(career, on="player_id", how="left")
+    season_start = out["season"].str[:4].astype(int)
+    out["years_experience"] = (season_start - out["from_year"]).clip(lower=0)
+    return out.drop(columns="from_year")

@@ -20,7 +20,10 @@ from sportslab.data.salaries import (
 def test_names_are_normalized_across_accents_punctuation_and_suffixes():
     assert normalize_name("Luka Dončić") == "luka doncic"
     assert normalize_name("Jaren Jackson Jr.") == normalize_name("Jaren Jackson")
-    assert normalize_name("P.J. Washington") == "p j washington"
+    assert normalize_name("P.J. Washington") == normalize_name("PJ Washington") == "pj washington"
+    assert normalize_name("De'Aaron Fox") == "deaaron fox"
+    assert normalize_name("Nicolas Claxton") == normalize_name("Nic Claxton")
+    assert normalize_name("Dennis Schroeder") == normalize_name("Dennis Schröder")
     assert normalize_name("Gary Trent  Jr") == "gary trent"
 
 
@@ -148,3 +151,20 @@ def test_gap_persistence_is_high_when_underpayment_is_a_lasting_trait():
 
     rho, low, high, n = gap_persistence(season(1), season(2), rookie_control=False, n_boot=100)
     assert n == 150 and low > 0.5 and low <= rho <= high
+
+
+def test_gap_z_flags_only_players_far_from_the_usual_spread():
+    players = _with_salary(_players(n=200, seed=11), underpaid=[5])
+    scored = score_players(players, rookie_control=False, n_boot=10).set_index("player_id")
+    assert scored.loc[5, "gap_z"] < -2 and abs(scored["gap_z"].median()) < 0.3
+    assert (scored["gap_z"].abs() > 2).sum() <= 6  # ~5% by chance, plus the planted one
+
+
+def test_experience_counts_seasons_since_the_first_one():
+    from sportslab.data.players import add_experience
+
+    players = pd.DataFrame({"season": ["2022-23"] * 3, "player_id": [1, 2, 3]})
+    career = pd.DataFrame({"player_id": [1, 2], "from_year": [2022, 2013]})
+    out = add_experience(players, career).set_index("player_id")
+    assert out.loc[1, "years_experience"] == 0 and out.loc[2, "years_experience"] == 9
+    assert pd.isna(out.loc[3, "years_experience"])

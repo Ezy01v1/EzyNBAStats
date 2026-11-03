@@ -53,7 +53,9 @@ def score_players(
 
     ``ratio`` < 1 means paid below the market for his production ("undervalued"), > 1 above. The
     interval comes from refitting the market on resampled players, so it captures how uncertain
-    the market line is, but NOT the noise in PIE itself (a hot year looks undervalued).
+    the market line is, but NOT the noise in PIE itself (a hot year looks undervalued). ``gap_z``
+    compares the gap with the usual spread of gaps (|z| > 2 = unusual even among comparable
+    players); it is the better guide to "who is far from the market".
     """
     pool = players[players["minutes"] >= MIN_MINUTES].reset_index(drop=True)
     x, y = design(pool, rookie_control), np.log(pool["salary_usd"].to_numpy())
@@ -68,6 +70,8 @@ def score_players(
     out["market_salary"] = np.exp(fitted)
     out["log_gap"] = y - fitted
     out["ratio"] = np.exp(out["log_gap"])
+    # How unusual the gap is next to the typical spread of gaps (residual sd, df-corrected).
+    out["gap_z"] = out["log_gap"] / float(np.std(out["log_gap"], ddof=x.shape[1] + 1))
     low, high = np.quantile(draws, [0.025, 0.975], axis=0)
     out["ratio_low"] = np.exp(y - high)
     out["ratio_high"] = np.exp(y - low)

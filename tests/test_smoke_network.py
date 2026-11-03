@@ -109,3 +109,12 @@ def test_awards_and_cutoff_player_stats(tmp_path):
     assert len(stats) > 400 and stats["team_w_pct"].notna().all()
     assert stats["gp"].max() < 50  # through mid-January, not the whole season
     assert 25 < stats["pts"].max() < 40
+
+
+def test_career_start_gives_a_first_season_for_current_players(tmp_path):
+    from sportslab.data.players import load_career_start
+
+    client = NbaClient(cache_dir=tmp_path, timeout=60)
+    career = load_career_start(client).set_index("player_id")
+    assert len(career) > 4000
+    assert career.loc[203999, "from_year"] == 2015  # Jokic's first season, 2015-16

@@ -20,13 +20,23 @@ import pandas as pd
 REQUIRED = ["season", "player_name", "salary_usd"]
 OPTIONAL = ["team", "player_id", "years_experience"]
 SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
+# Same player, different spelling in the two sources (found by checking who failed to match).
+ALIASES = {
+    "dennis schroeder": "dennis schroder",
+    "herb jones": "herbert jones",
+    "nicolas claxton": "nic claxton",
+    "santiago aldama": "santi aldama",
+}
 
 
 def normalize_name(name: str) -> str:
-    """Lowercase, no accents or punctuation, no Jr./III suffix: "Luka Dončić" -> "luka doncic"."""
-    text = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode()
-    tokens = re.sub(r"[^a-z0-9 ]", " ", text.lower()).split()
-    return " ".join(t for t in tokens if t not in SUFFIXES)
+    """Lowercase, no accents, periods or apostrophes, no Jr./III suffix, known aliases applied:
+    "Luka Dončić" -> "luka doncic", "P.J. Washington" -> "pj washington"."""
+    text = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode().lower()
+    text = re.sub(r"[.'’]", "", text)  # "p.j." and "de'aaron" collapse instead of splitting
+    tokens = re.sub(r"[^a-z0-9 ]", " ", text).split()
+    key = " ".join(t for t in tokens if t not in SUFFIXES)
+    return ALIASES.get(key, key)
 
 
 def parse_salary(value) -> float:
