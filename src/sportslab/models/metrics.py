@@ -49,6 +49,27 @@ def calibration_table(y_true: np.ndarray, p: np.ndarray, n_bins: int = 10) -> pd
     return table.reset_index()
 
 
+def paired_log_loss_gain(
+    y_true: np.ndarray, p_new: np.ndarray, p_ref: np.ndarray
+) -> tuple[float, float, float]:
+    """Mean per-game log-loss improvement of ``p_new`` over ``p_ref`` with a 95% interval.
+
+    Positive = new model is better. Comparing two models on the *same* games and looking at
+    the per-game difference is far more precise than comparing two averages. If the interval
+    contains 0, the difference is indistinguishable from noise on this sample.
+    """
+    y = np.asarray(y_true, dtype=float)
+
+    def per_game_loss(p: np.ndarray) -> np.ndarray:
+        p = np.clip(np.asarray(p, dtype=float), _EPS, 1 - _EPS)
+        return -(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+    diff = per_game_loss(p_ref) - per_game_loss(p_new)
+    mean = float(diff.mean())
+    half = 1.96 * float(diff.std(ddof=1)) / np.sqrt(len(diff))
+    return mean, mean - half, mean + half
+
+
 def score_all(y_true: np.ndarray, p: np.ndarray) -> dict[str, float]:
     return {
         "log_loss": log_loss(y_true, p),
