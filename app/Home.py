@@ -14,7 +14,7 @@ st.markdown(
 | # | Módulo | Estado |
 |---|---|---|
 | 1 | Predictor de resultados (Elo, logística, XGBoost) | **Elo listo**; faltan los otros dos |
-| 2 | Shot charts | pendiente |
+| 2 | Shot charts (zonas, dónde vs. cómo) | **listo** |
 | 3 | Comparador de jugadores (radar de percentiles) | **listo** |
 | 4 | Clustering de roles | pendiente |
 | 5 | Subvalorados | pendiente |
