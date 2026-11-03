@@ -7,6 +7,7 @@ import pytest
 from nba_api.stats.endpoints import LeagueDashPlayerStats, LeagueGameLog
 
 from sportslab.data.client import NbaClient
+from sportslab.data.lineups import load_lineups, load_team_ratings
 from sportslab.data.players import clean_player_stats
 from sportslab.data.profiles import load_per100, load_shot_zones
 from sportslab.data.shots import load_player_shots
@@ -60,3 +61,16 @@ def test_player_style_tables_cover_the_same_players(tmp_path):
     assert set(zones["player_id"]) <= set(per100["player_id"])
     assert (zones[["ra_fga", "mid_fga", "atb3_fga"]] >= 0).all().all()
     assert 40 < per100["fga100"].median() * 3 < 100  # sanity: ~per-100 scale, not per game
+
+
+def test_lineups_are_capped_and_team_ratings_cover_30_teams(tmp_path):
+    from datetime import date
+
+    client = NbaClient(cache_dir=tmp_path, timeout=60)
+    five = load_lineups(client, "2023-24", 5)
+    # NBA.com returns at most ~2000 lineups (the busiest ones); this limit shapes every analysis
+    assert 1500 < len(five) <= 2000 and five["minutes"].is_monotonic_decreasing
+    half = load_lineups(client, "2023-24", 2, date_to=date(2024, 1, 15))
+    assert (half["poss"] > 0).all() and not half.duplicated(["lineup_id", "team_id"]).any()
+    teams = load_team_ratings(client, "2023-24")
+    assert len(teams) == 30 and teams["net_rating"].abs().max() < 20
