@@ -9,10 +9,13 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "duckdb>=2.0.0",
+    "matplotlib>=3.11.2",
     "nba-api>=1.12.0",
     "numpy>=2.5.4",
     "pandas>=3.1.0",
+    "plotly>=7.1.0",
     "pyarrow>=26.0.1",
+    "streamlit>=1.66.1",
 ]
 
 [build-system]
@@ -21,6 +24,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "jupyterlab>=4.6.5",
     "pytest>=9.2.0",
     "ruff>=0.17.3",
 ]
@@ -38,3 +42,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = ["E501"]  # chart titles in notebooks read better as one long f-string

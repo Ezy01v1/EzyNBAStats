@@ -1,6 +1,7 @@
 """Game-level table built from NBA.com team game logs (LeagueGameLog)."""
 
 from collections.abc import Sequence
+from datetime import timedelta
 
 import pandas as pd
 from nba_api.stats.endpoints import LeagueGameLog
@@ -28,6 +29,8 @@ def team_logs_to_games(log: pd.DataFrame, season: str) -> pd.DataFrame:
     LeagueGameLog has one row per team per game. The home side is the one whose MATCHUP reads
     "BOS vs. NYK"; the visitor's reads "NYK @ BOS".
     """
+    if log.empty:  # e.g. a season that has not started yet
+        return pd.DataFrame(columns=GAME_COLUMNS)
     is_home = log["MATCHUP"].str.contains(" vs. ", regex=False)
     by_game = log["GAME_ID"]
     n_home_rows = is_home.groupby(by_game).transform("sum")
@@ -64,13 +67,22 @@ def team_logs_to_games(log: pd.DataFrame, season: str) -> pd.DataFrame:
     return games[GAME_COLUMNS].sort_values(["game_date", "game_id"]).reset_index(drop=True)
 
 
-def load_games(client: NbaClient, seasons: Sequence[str]) -> pd.DataFrame:
-    """Regular-season games for the given seasons (e.g. ``["2023-24", "2024-25"]``)."""
+def load_games(
+    client: NbaClient, seasons: Sequence[str], max_age: timedelta | None = None
+) -> pd.DataFrame:
+    """Regular-season games for the given seasons (e.g. ``["2023-24", "2024-25"]``).
+
+    Leave ``max_age`` as None for finished seasons (cached forever); pass e.g.
+    ``timedelta(hours=6)`` for the season in progress so new games get picked up.
+    """
     frames = []
     for season in seasons:
-        (log,) = client.fetch(LeagueGameLog, season=season, season_type_all_star="Regular Season")
+        (log,) = client.fetch(
+            LeagueGameLog, season=season, season_type_all_star="Regular Season", max_age=max_age
+        )
         frames.append(team_logs_to_games(log, season))
-    return pd.concat(frames, ignore_index=True)
+    frames = [f for f in frames if not f.empty]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=GAME_COLUMNS)
 
 
 def season_labels(first_start_year: int, last_start_year: int) -> list[str]:

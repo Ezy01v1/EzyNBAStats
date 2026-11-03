@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from sportslab.models.elo import EloParams, expected_home_win, run_elo
+from sportslab.models.elo import EloParams, expected_home_win, final_ratings, run_elo
 
 
 def _games(rows: list[tuple[str, int, int, int]]) -> pd.DataFrame:
@@ -72,3 +72,17 @@ def test_no_lookahead_prediction_ignores_the_game_result_itself_and_the_future()
 def test_probabilities_stay_in_open_unit_interval():
     out = run_elo(_games([("2023-24", 1, 2, 1)] * 200), EloParams(k=40))
     assert out["p_home"].between(0, 1, inclusive="neither").all()
+
+
+def test_final_ratings_keep_the_league_mean_at_the_initial_rating():
+    games = _games(
+        [
+            ("2022-23", 1, 2, 1),
+            ("2022-23", 3, 1, 0),
+            ("2023-24", 2, 3, 1),
+            ("2023-24", 1, 3, 1),
+        ]
+    )
+    ratings = final_ratings(games, EloParams(carryover=0.7))
+    assert set(ratings) == {1, 2, 3}
+    assert sum(ratings.values()) / 3 == pytest.approx(1500)

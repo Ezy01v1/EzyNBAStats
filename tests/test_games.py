@@ -1,6 +1,6 @@
 import pandas as pd
 
-from sportslab.data.games import team_logs_to_games
+from sportslab.data.games import GAME_COLUMNS, team_logs_to_games
 
 
 def _log() -> pd.DataFrame:
@@ -64,3 +64,10 @@ def test_neutral_site_game_has_no_real_home_team():
 
 def test_season_label_is_attached():
     assert set(team_logs_to_games(_log(), season="2023-24")["season"]) == {"2023-24"}
+
+
+def test_empty_log_gives_empty_games_with_expected_columns():
+    # e.g. a season whose first game has not been played yet
+    games = team_logs_to_games(_log().iloc[0:0], season="2026-27")
+    assert games.empty
+    assert list(games.columns) == GAME_COLUMNS

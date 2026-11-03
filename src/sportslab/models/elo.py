@@ -36,6 +36,15 @@ def run_elo(games: pd.DataFrame, params: EloParams | None = None) -> pd.DataFram
 
     ``games`` must be chronological and carry season, home_team_id, away_team_id, home_win.
     """
+    return _walk(games, params)[0]
+
+
+def final_ratings(games: pd.DataFrame, params: EloParams | None = None) -> dict[int, float]:
+    """Team ratings after the last game in ``games`` (team_id -> rating)."""
+    return _walk(games, params)[1]
+
+
+def _walk(games: pd.DataFrame, params: EloParams | None) -> tuple[pd.DataFrame, dict[int, float]]:
     params = params or EloParams()
     ratings: dict[int, float] = {}
     current_season: str | None = None
@@ -44,12 +53,13 @@ def run_elo(games: pd.DataFrame, params: EloParams | None = None) -> pd.DataFram
     elo_away = [0.0] * n
     p_home = [0.0] * n
 
-    neutral = games["neutral_site"] if "neutral_site" in games else [False] * n
+    neutral = games["neutral_site"].tolist() if "neutral_site" in games else [False] * n
+    # Plain lists: iterating pandas Series element by element is ~10x slower.
     rows = zip(
-        games["season"],
-        games["home_team_id"],
-        games["away_team_id"],
-        games["home_win"],
+        games["season"].tolist(),
+        games["home_team_id"].tolist(),
+        games["away_team_id"].tolist(),
+        games["home_win"].tolist(),
         neutral,
         strict=True,
     )
@@ -73,7 +83,7 @@ def run_elo(games: pd.DataFrame, params: EloParams | None = None) -> pd.DataFram
     out["elo_home_pre"] = elo_home
     out["elo_away_pre"] = elo_away
     out["p_home"] = p_home
-    return out
+    return out, ratings
 
 
 def scoring_games(games: pd.DataFrame, seasons: Iterable[str]) -> pd.DataFrame:

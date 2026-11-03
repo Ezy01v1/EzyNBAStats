@@ -36,3 +36,13 @@ def test_calibration_table_bins_predictions():
     assert table["mean_pred"].iloc[0] == pytest.approx(0.05)
     assert table["observed"].iloc[0] == 1.0
     assert table["observed"].iloc[1] == pytest.approx(1 / 3)
+
+
+def test_accuracy_counts_a_dead_even_prediction_as_half_right():
+    assert accuracy(np.array([1, 0]), np.array([0.5, 0.5])) == pytest.approx(0.5)
+
+
+def test_calibration_table_has_wilson_interval_around_observed_rate():
+    table = calibration_table(np.array([1, 0, 1, 1, 0]), np.full(5, 0.6), n_bins=10)
+    row = table.iloc[0]
+    assert 0 <= row["ci_low"] < row["observed"] < row["ci_high"] <= 1
