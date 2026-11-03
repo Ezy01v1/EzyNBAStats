@@ -19,7 +19,7 @@ st.markdown(
 | 4 | Clustering de roles (con pruebas de validez) | **listo** |
 | 5 | Subvalorados | pendiente |
 | 6 | Simulador de temporada y playoffs | pendiente |
-| 7 | Análisis de lineups | pendiente |
+| 7 | Análisis de lineups (con incertidumbre y persistencia) | **listo** |
 | 8 | Predictor de MVP / All-Star | pendiente |
 | 9 | Dashboard diario | pendiente |
 | 10 | Proyecciones fantasy (educativas) | pendiente |
