@@ -21,8 +21,8 @@ st.markdown(
 | 6 | Simulador de temporada y playoffs (con backtest) | **listo** |
 | 7 | Análisis de lineups (con incertidumbre y persistencia) | **listo** |
 | 8 | Predictor de All-Star / All-NBA y ranking de MVP | **listo** |
-| 9 | Dashboard diario | pendiente |
-| 10 | Proyecciones fantasy (educativas) | pendiente |
+| 9 | Dashboard diario | **listo** |
+| 10 | Proyecciones fantasy con intervalos (educativas) | **listo** |
 """
 )
 st.caption(
