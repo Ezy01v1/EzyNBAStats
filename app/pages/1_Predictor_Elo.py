@@ -8,8 +8,10 @@ import streamlit as st
 
 from sportslab.data import NbaClient, NbaClientError
 from sportslab.data.games import load_games, season_labels
-from sportslab.models.elo import expected_home_win, final_ratings
+from sportslab.features.team_form import build_pregame_features
+from sportslab.models.elo import EloParams, expected_home_win, final_ratings
 from sportslab.models.experiment import EloExperiment, home_rate_by_season, run_elo_experiment
+from sportslab.models.supervised import SupervisedExperiment, run_supervised_experiment
 
 VALIDATION = ["2023-24", "2024-25"]
 TEST = "2025-26"
@@ -31,6 +33,12 @@ def get_current_games() -> pd.DataFrame:
 @st.cache_data(show_spinner="Ajustando y evaluando el Elo…")
 def get_experiment(games: pd.DataFrame) -> EloExperiment:
     return run_elo_experiment(games, validation=VALIDATION, test=TEST)
+
+
+@st.cache_data(show_spinner="Entrenando logística y XGBoost…")
+def get_supervised(games: pd.DataFrame, elo_params: EloParams) -> SupervisedExperiment:
+    features = build_pregame_features(games, elo_params)
+    return run_supervised_experiment(features, season_labels(2016, 2022), VALIDATION, TEST)
 
 
 st.title("Predictor de resultados: Elo")
@@ -73,8 +81,13 @@ st.sidebar.caption(
     f"prueba final en {TEST}."
 )
 
-tab_result, tab_ratings, tab_games = st.tabs(
-    ["Resultado del experimento", "Ratings y enfrentamiento", f"Partidos {TEST}"]
+tab_result, tab_models, tab_ratings, tab_games = st.tabs(
+    [
+        "Resultado del experimento",
+        "Más variables y modelos",
+        "Ratings y enfrentamiento",
+        f"Partidos {TEST}",
+    ]
 )
 
 with tab_result:
@@ -161,6 +174,69 @@ table = (
 )
 table.index = table.index + 1
 as_of = all_games["game_date"].max().date()
+
+with tab_models:
+    sup = get_supervised(finished, tuned)
+    gains = sup.gain_vs_elo_test.drop(index="home rate")
+    clear = int(((gains["ci_low"] > 0) | (gains["ci_high"] < 0)).sum())
+    st.subheader(
+        f"En {TEST}, ningún modelo supera al Elo con certeza: todos los intervalos incluyen 0"
+        if clear == 0
+        else f"En {TEST}, {clear} modelo(s) superan al Elo con un intervalo que excluye 0"
+    )
+    st.caption(
+        "Variables previas al partido: diferencia de Elo, forma (margen de los últimos 10 "
+        "partidos de la temporada, encogido hacia 0) y descanso/back-to-back. Entrenado con "
+        f"2016-17 a 2022-23, validado con {VALIDATION[0]} y {VALIDATION[1]}, prueba {TEST}."
+    )
+    st.dataframe(
+        sup.scores_test.rename(
+            columns={"log_loss": "log loss", "brier": "Brier", "accuracy": "acierto"}
+        ),
+        width="stretch",
+    )
+
+    left, right = st.columns(2)
+    with left:
+        fig = go.Figure()
+        for label, frame, color in (
+            ("validación 2023-25", sup.gain_vs_elo_validation.drop(index="home rate"), "#9ECAE9"),
+            (f"prueba {TEST}", gains, "#4C78A8"),
+        ):
+            fig.add_trace(
+                go.Scatter(
+                    x=frame["gain"],
+                    y=frame.index,
+                    mode="markers",
+                    name=label,
+                    marker={"color": color, "size": 9},
+                    error_x={
+                        "type": "data",
+                        "symmetric": False,
+                        "array": frame["ci_high"] - frame["gain"],
+                        "arrayminus": frame["gain"] - frame["ci_low"],
+                    },
+                )
+            )
+        fig.add_vline(x=0, line_dash="dash")
+        fig.update_layout(
+            title="Mejora de log loss sobre el Elo (positivo = mejor), IC 95 %",
+            xaxis_title="mejora por partido",
+            height=380,
+        )
+        st.plotly_chart(fig, width="stretch")
+    with right:
+        # Separate charts: the two numbers are on different scales and must not be stacked.
+        st.markdown("**Logística: peso estandarizado de cada variable**")
+        st.bar_chart(sup.logistic_coefficients, horizontal=True, height=170)
+        st.markdown("**XGBoost: importancia (ganancia normalizada)**")
+        st.bar_chart(sup.xgb_importance, horizontal=True, height=170)
+    st.caption(
+        f"XGBoost usó {sup.best_iteration + 1} árboles (early stopping en la última temporada de "
+        "entrenamiento). Un intervalo que incluye 0 significa que la diferencia no se distingue "
+        "del azar con esta muestra. Lo que probablemente falta es información (lesiones, "
+        "alineaciones), no un modelo más complejo."
+    )
 
 with tab_ratings:
     st.subheader(f"Ratings Elo al {as_of}")
