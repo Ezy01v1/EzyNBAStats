@@ -16,3 +16,11 @@ python -m uv run ruff check .
 Run from your own PC: stats.nba.com blocks many cloud IPs and throttles bursts.
 All `nba_api` calls go through `sportslab.data.NbaClient` (cache + rate limit + retries).
 Raw data lives in `data/raw/` (git-ignored; NBA.com terms apply).
+
+## Run the app
+
+```bash
+python -m uv run streamlit run app/Home.py
+python -m uv run jupyter lab         # notebooks/01_elo_predictor.ipynb
+python -m uv run python scripts/elo_experiment.py
+```
