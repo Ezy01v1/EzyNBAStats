@@ -118,3 +118,14 @@ def test_career_start_gives_a_first_season_for_current_players(tmp_path):
     career = load_career_start(client).set_index("player_id")
     assert len(career) > 4000
     assert career.loc[203999, "from_year"] == 2015  # Jokic's first season, 2015-16
+
+
+def test_player_game_log_has_fantasy_points_for_a_whole_season(tmp_path):
+    from sportslab.data.gamelog import load_player_games
+
+    client = NbaClient(cache_dir=tmp_path, timeout=60)
+    games = load_player_games(client, ["2023-24"])
+    assert 20_000 < len(games) < 40_000 and games["player_id"].nunique() > 450
+    assert set(games["home"]) == {True, False} and games["opponent"].str.len().eq(3).all()
+    jokic = games[games["player_id"] == 203999]
+    assert 60 < len(jokic) <= 82 and jokic["fantasy"].mean() > 40
