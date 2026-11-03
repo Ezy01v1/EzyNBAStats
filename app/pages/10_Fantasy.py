@@ -11,18 +11,8 @@ from sportslab.config import PROCESSED_DIR
 from sportslab.data import NbaClient, NbaClientError
 from sportslab.data.gamelog import load_player_games
 from sportslab.data.schedule import load_schedule
-from sportslab.features.fantasy import (
-    append_next_games,
-    build_features,
-    eligible_rows,
-    fill_missing,
-)
-from sportslab.models.fantasy_model import (
-    IntervalCalibrator,
-    coverage,
-    fit_ridge,
-    predict_ridge,
-)
+from sportslab.models.fantasy_model import coverage
+from sportslab.models.fantasy_projection import project_next_games
 
 CURRENT = "2026-27"
 FINISHED = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
@@ -44,31 +34,8 @@ def get_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 @st.cache_data(show_spinner="Ajustando el modelo y calculando proyecciones…")
 def get_projections(games: pd.DataFrame, schedule: pd.DataFrame, as_of: str) -> pd.DataFrame:
-    since = games["game_date"].max()
-    feats = build_features(append_next_games(games, schedule, since))
-    played = feats[~feats["is_next"]]
-    train = fill_missing(eligible_rows(played[played["season"].isin(TRAIN)]))
-    ridge = fit_ridge(train)
-    calib_rows = fill_missing(eligible_rows(played[played["season"] == FINISHED[-1]]))
-    calibrator = IntervalCalibrator().fit(predict_ridge(ridge, calib_rows), calib_rows["target"])
-    nxt = fill_missing(eligible_rows(feats[feats["is_next"]]))
-    out = nxt[
-        [
-            "player_id",
-            "player",
-            "team",
-            "opponent",
-            "home",
-            "game_date",
-            "n_prior_season",
-            "season_mean",
-        ]
-    ].copy()
-    out["projection"] = predict_ridge(ridge, nxt)
-    for level in (0.5, 0.8):
-        low, high = calibrator.interval(out["projection"].to_numpy(), level)
-        out[f"low{int(level * 100)}"], out[f"high{int(level * 100)}"] = low, high
-    return out.reset_index(drop=True)
+    # `as_of` is in the signature so the cache refreshes when new games are played
+    return project_next_games(games, schedule, TRAIN, FINISHED[-1])
 
 
 st.title(f"Proyecciones fantasy del próximo partido ({CURRENT})")
