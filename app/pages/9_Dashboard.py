@@ -1,7 +1,5 @@
 """Module 9 page: daily dashboard. Descriptive, plus Elo probabilities (educational, no betting)."""
 
-from datetime import timedelta
-
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -17,14 +15,11 @@ from sportslab.analysis.daily import (
 )
 from sportslab.data import NbaClient, NbaClientError
 from sportslab.data.gamelog import load_player_games
-from sportslab.data.games import load_games, season_labels
-from sportslab.data.schedule import load_conferences, load_schedule, schedule_to_games
-from sportslab.models.elo import EloParams, run_elo
+from sportslab.data.schedule import schedule_to_games
 from sportslab.models.season_sim import SimConfig, simulate_season
-from sportslab.models.season_state import SeasonState, build_season_state
+from sportslab.models.season_state import SeasonState
+from sportslab.service.context import CURRENT, FRESHNESS, TUNED_ELO, load_context
 
-CURRENT = "2026-27"
-TUNED_ELO = EloParams(k=24, home_advantage=40, carryover=0.7)  # tuned in Module 1
 BLUE, ORANGE = "#4C78A8", "#F58518"
 
 st.set_page_config(page_title="Dashboard diario", page_icon="🏀", layout="wide")
@@ -32,17 +27,11 @@ st.set_page_config(page_title="Dashboard diario", page_icon="🏀", layout="wide
 
 @st.cache_data(ttl=1800, show_spinner="Cargando calendario, resultados y estadísticas…")
 def get_data():
+    # Same loading as the API (sportslab.service.context), so both show the same numbers
     client = NbaClient()
-    fresh = timedelta(hours=3)
-    history = load_games(client, season_labels(2015, 2025))
-    schedule = load_schedule(client, CURRENT, max_age=fresh)
-    conferences = load_conferences(client, CURRENT)
-    players = load_player_games(client, [CURRENT], max_age=fresh)
-    state = build_season_state(history, schedule, conferences, CURRENT, TUNED_ELO)
-    pre = run_elo(
-        pd.concat([history, schedule_to_games(schedule, CURRENT)], ignore_index=True), TUNED_ELO
-    )
-    return history, schedule, conferences, players, state, pre
+    ctx = load_context(client, CURRENT)
+    players = load_player_games(client, [CURRENT], max_age=FRESHNESS)
+    return ctx.schedule, ctx.conferences, players, ctx.state, ctx.pre_game
 
 
 @st.cache_data(show_spinner="Simulando el resto de la temporada…")
@@ -65,7 +54,7 @@ st.caption(
 )
 
 try:
-    history, schedule, conferences, players, state, pre = get_data()
+    schedule, conferences, players, state, pre = get_data()
 except NbaClientError as exc:
     st.error(
         "No pude descargar los datos y no están en la caché. stats.nba.com bloquea muchas IPs; "

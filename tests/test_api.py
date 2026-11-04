@@ -15,6 +15,7 @@ from sportslab.service.context import (
     CurrentContext,
     DataService,
     ServiceUnavailable,
+    history_seasons,
 )
 
 SEASON = "2026-27"
@@ -98,24 +99,28 @@ def _context(_client=None) -> CurrentContext:
 class FakeService(DataService):
     """Real context logic on synthetic data; projections without any network."""
 
-    def projections(self) -> pd.DataFrame:
-        return pd.DataFrame(
-            {
-                "player_id": [1, 2, 3],
-                "player": ["A", "B", "C"],
-                "team": ["BOS", "BOS", "NYK"],
-                "opponent": ["NYK", "NYK", "BOS"],
-                "home": [True, True, False],
-                "game_date": pd.to_datetime(["2026-12-01"] * 3),
-                "n_prior_season": [8, 8, 5],
-                "season_mean": [30.0, 20.0, 25.0],
-                "projection": [31.0, 22.0, 26.0],
-                "low50": [24.0, 16.0, 19.0],
-                "high50": [38.0, 28.0, 33.0],
-                "low80": [18.0, 10.0, 12.0],
-                "high80": [45.0, 34.0, 40.0],
-            }
-        )
+    def projections(self, ctx=None) -> tuple[pd.DataFrame, bool]:
+        return _fake_projections(), False
+
+
+def _fake_projections() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "player_id": [1, 2, 3],
+            "player": ["A", "B", "C"],
+            "team": ["BOS", "BOS", "NYK"],
+            "opponent": ["NYK", "NYK", "BOS"],
+            "home": [True, True, False],
+            "game_date": pd.to_datetime(["2026-12-01"] * 3),
+            "n_prior_season": [8, 8, 5],
+            "season_mean": [30.0, 20.0, 25.0],
+            "projection": [31.0, 22.0, 26.0],
+            "low50": [24.0, 16.0, 19.0],
+            "high50": [38.0, 28.0, 33.0],
+            "low80": [18.0, 10.0, 12.0],
+            "high80": [45.0, 34.0, 40.0],
+        }
+    )
 
 
 @pytest.fixture
@@ -262,3 +267,100 @@ def test_stale_data_is_served_when_a_refresh_fails_and_503_without_any_data():
     with pytest.raises(ServiceUnavailable):
         empty.context()
     assert date.today()  # sanity: the module imports date for the meta payload
+
+
+def test_a_failed_refresh_is_not_retried_on_every_request():
+    clock, calls = _Clock(), []
+
+    def loader(_client):
+        calls.append(1)
+        if len(calls) > 1:
+            raise NbaClientError("blocked")
+        return _context()
+
+    service = DataService(
+        client=object(),
+        context_loader=loader,
+        ttl=timedelta(minutes=1),
+        retry_after=timedelta(minutes=2),
+        clock=clock,
+    )
+    service.context()
+    clock.t = 61.0
+    assert service.context()[1] is True and len(calls) == 2
+    clock.t = 100.0
+    assert service.context()[1] is True and len(calls) == 2  # inside the back-off: no retry
+    clock.t = 61.0 + 121.0
+    service.context()
+    assert len(calls) == 3
+
+
+def test_an_unexpected_payload_error_also_falls_back_to_the_old_copy():
+    clock, state = _Clock(), {"fail": False}
+
+    def loader(_client):
+        if state["fail"]:
+            raise KeyError("gameDate")
+        return _context()
+
+    service = DataService(
+        client=object(), context_loader=loader, ttl=timedelta(minutes=1), clock=clock
+    )
+    first, _ = service.context()
+    clock.t, state["fail"] = 120.0, True
+    ctx, stale = service.context()
+    assert stale is True and ctx is first
+
+
+def test_each_successful_load_gets_a_new_version():
+    clock = _Clock()
+    service = DataService(
+        client=object(), context_loader=_context, ttl=timedelta(minutes=1), clock=clock
+    )
+    v1 = service.context()[0].version
+    clock.t = 120.0
+    assert service.context()[0].version == v1 + 1
+
+
+def test_projections_fall_back_to_the_previous_table_when_game_logs_fail(monkeypatch):
+    import sportslab.service.context as context_module
+
+    clock, state = _Clock(), {"fail": False}
+
+    def fake_load(_client, seasons, max_age=None):
+        if state["fail"]:
+            raise NbaClientError("blocked")
+        return pd.DataFrame()
+
+    monkeypatch.setattr(context_module, "load_player_games", fake_load)
+    monkeypatch.setattr(context_module, "project_next_games", lambda *a: _fake_projections())
+    service = DataService(
+        client=object(), context_loader=_context, ttl=timedelta(minutes=1), clock=clock
+    )
+    table, stale = service.projections()
+    assert stale is False and len(table) == 3
+    clock.t, state["fail"] = 120.0, True  # new context version, game logs blocked
+    table, stale = service.projections()
+    assert stale is True and len(table) == 3
+
+    empty = DataService(client=object(), context_loader=_context, clock=_Clock())
+    with pytest.raises(ServiceUnavailable):
+        empty.projections()
+
+
+def test_standings_odds_tolerate_a_team_missing_from_the_simulation(client):
+    http, service = client
+    real = DataService.simulation
+
+    def partial(self, n_sims, rating_sd=75.0, ctx=None):
+        return real(self, n_sims, rating_sd, ctx).drop(index=1)
+
+    service.simulation = partial.__get__(service)
+    rows = http.get("/v1/standings", params={"include_odds": "true"}).json()["standings"]
+    assert next(r for r in rows if r["team_id"] == 1)["p_playoffs"] is None
+
+
+def test_history_seasons_follow_the_season_in_progress():
+    assert history_seasons("2026-27")[0] == "2015-16"
+    assert history_seasons("2026-27")[-1] == "2025-26"
+    assert history_seasons("2027-28")[-1] == "2026-27"

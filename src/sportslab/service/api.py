@@ -162,7 +162,7 @@ def create_app() -> FastAPI:
         ctx, _ = service.context()
         table = standings(schedule_to_games(ctx.schedule, ctx.season), ctx.conferences)
         table["elo"] = table["team_id"].map(ctx.state.ratings)
-        odds = service.simulation(3000)["p_playoffs"] if include_odds else None
+        odds = service.simulation(3000, ctx=ctx)["p_playoffs"] if include_odds else None
         rows = []
         for conf, part in table.groupby("conference", sort=True):
             for rank, r in enumerate(part.itertuples(), start=1):
@@ -178,7 +178,7 @@ def create_app() -> FastAPI:
                         last10=r.last_n if isinstance(r.last_n, str) else "0-0",
                         point_diff=_none_if_nan(r.diff),
                         elo=_none_if_nan(r.elo),
-                        p_playoffs=None if odds is None else float(odds.get(r.team_id)),
+                        p_playoffs=_odds_for(odds, r.team_id),
                     )
                 )
         return schemas.StandingsResponse(
@@ -191,15 +191,15 @@ def create_app() -> FastAPI:
         service: DataService = Depends(get_service),
     ):
         ctx, _ = service.context()
-        table = service.simulation(n_sims)
+        table = service.simulation(n_sims, ctx=ctx)
         from sportslab.models.season_sim import NOTES, VALIDATED_RATING_SD
 
         names = ctx.conferences.set_index("team_id")
         teams = [
             schemas.SimTeam(
                 team_id=int(tid),
-                team=names.loc[tid, "team"],
-                conference=names.loc[tid, "conference"],
+                team=names["team"].get(tid, "TBD"),
+                conference=names["conference"].get(tid, "TBD"),
                 elo=float(r.elo),
                 current_wins=int(r.current_wins),
                 exp_wins=float(r.exp_wins),
@@ -248,18 +248,20 @@ def create_app() -> FastAPI:
         service: DataService = Depends(get_service),
     ):
         ctx, _ = service.context()
-        table = service.projections()
+        table, stale = service.projections(ctx)
         if team:
             table = table[table["team"].str.upper() == team.upper()]
         table = table.sort_values("projection", ascending=False).head(limit)
         return schemas.ProjectionsResponse(
-            data_as_of=_to_date(last_game_day(ctx.schedule)), projections=_projection_rows(table)
+            data_as_of=_to_date(last_game_day(ctx.schedule)),
+            stale=stale,
+            projections=_projection_rows(table),
         )
 
     @app.get("/v1/fantasy/projections/{player_id}", response_model=schemas.ProjectionsResponse)
     def fantasy_projection_for(player_id: int, service: DataService = Depends(get_service)):
         ctx, _ = service.context()
-        table = service.projections()
+        table, stale = service.projections(ctx)
         row = table[table["player_id"] == player_id]
         if row.empty:
             raise HTTPException(
@@ -267,10 +269,20 @@ def create_app() -> FastAPI:
                 detail="No projection for this player: not active recently, or under 15 minutes.",
             )
         return schemas.ProjectionsResponse(
-            data_as_of=_to_date(last_game_day(ctx.schedule)), projections=_projection_rows(row)
+            data_as_of=_to_date(last_game_day(ctx.schedule)),
+            stale=stale,
+            projections=_projection_rows(row),
         )
 
     return app
+
+
+def _odds_for(odds: pd.Series | None, team_id) -> float | None:
+    """Playoff probability of a team, or None if odds were not requested or it was not simulated."""
+    if odds is None:
+        return None
+    value = odds.get(team_id)
+    return None if value is None or pd.isna(value) else float(value)
 
 
 def _to_date(ts: pd.Timestamp | None) -> date | None:

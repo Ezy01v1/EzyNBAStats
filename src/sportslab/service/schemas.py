@@ -118,6 +118,9 @@ class Projection(BaseModel):
 
 class ProjectionsResponse(BaseModel):
     data_as_of: date | None
+    stale: bool = Field(
+        default=False, description="True if the game logs could not be refreshed (older copy)"
+    )
     note: str = (
         "Conditional on the player playing: the data has no injury information. A single game is "
         "very noisy; use the intervals, not just the point projection."

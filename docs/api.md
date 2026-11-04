@@ -38,7 +38,8 @@ on the player playing (the data has no injury information).
 - **Data freshness.** The context is kept in memory for 30 minutes; refreshes go through the
   client (which accepts NBA.com data up to 3 hours old for the season in progress).
 - **Failures are explicit.** If a refresh fails but an older copy exists, it is served with
-  `"stale": true`. With no data at all the service answers **503** with an explanation (NBA.com
+  `"stale": true` and the next attempt waits 2 minutes (no retry on every request). The same holds
+  for the fantasy projections (`stale` in their response). With no data at all the service answers **503** with an explanation (NBA.com
   blocks many cloud IPs: run it from your PC).
 - **Validation.** Bad dates and out-of-range `n_sims`/`limit` return **422**; unknown players **404**.
 - **Cost.** The first request after startup loads data (seconds to a minute if the disk cache is
