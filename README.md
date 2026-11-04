@@ -34,3 +34,17 @@ python -m uv run uvicorn sportslab.service.api:app --host 127.0.0.1 --port 8000
 Docs and design limits (localhost only, no auth, connects to nothing else) in
 [docs/api.md](docs/api.md).
 
+## Record and score predictions (Neon)
+
+Predictions are frozen in a Postgres database (a dedicated Neon project, `sports-analytics-lab`)
+before the games, then scored against the results: the honest out-of-sample test. Put the
+connection string in a local `.env` (git-ignored; see `.env.example`) and run, once a day:
+
+```bash
+python -m uv run python scripts/record_predictions.py
+python -m uv run python scripts/score_predictions.py
+```
+
+Re-running `record` on the same day adds nothing (the first snapshot of the day wins). Only this
+lab's predictions are stored there; nothing is connected to any other app.
+
