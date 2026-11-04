@@ -26,3 +26,6 @@ data/external/*
 
 # Local secrets (Neon connection string)
 .env
+
+# Logs of the scheduled daily run
+logs/

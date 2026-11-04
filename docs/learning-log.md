@@ -134,5 +134,6 @@ One entry per module: what I learned, what failed, what to improve.
 - **First run:** 1,099 game predictions (all remaining games, Nov 4 to Apr 11) and 308 fantasy projections; average p_home 0.548. Nothing scored yet.
 - **Hypotheses:** none given ("defaults"). Expectation to check later: Brier near 0.22 (Module 1 test level) and the 80% interval close to 80% if the calibration from 2025-26 carries over.
 - **Safety:** the connection string lives only in the git-ignored `.env`; the database test runs in a throwaway schema it drops at the end, never in the real tables. Not recording when data is stale (the script refuses).
-- **Not done:** scheduling the daily run, a page/notebook for the evaluation (worth it once there are a few hundred scored games), storing predictions of other models for comparison.
+- **Scheduled (same day):** Windows Task Scheduler runs `scripts/daily_predictions.cmd` daily at 11:00 (score, then record), catching up after the PC was off. Gotcha: the task's environment does not see `uv`, so the job calls `.venv\Scripts\python.exe` directly.
+- **Not done:** a page/notebook for the evaluation (worth it once there are a few hundred scored games), storing predictions of other models for comparison.
 

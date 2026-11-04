@@ -45,6 +45,10 @@ python -m uv run python scripts/record_predictions.py
 python -m uv run python scripts/score_predictions.py
 ```
 
+A Windows scheduled task, **SportsLab daily predictions**, runs both every day at 11:00 through
+`scripts/daily_predictions.cmd` (it catches up when the PC was off; output in
+`logs/daily_predictions.log`). It runs on this PC on purpose: stats.nba.com blocks most cloud IPs.
+
 Re-running `record` on the same day adds nothing (the first snapshot of the day wins). Only this
 lab's predictions are stored there; nothing is connected to any other app.
 
