@@ -18,6 +18,7 @@ from sportslab.features.fantasy import (
 from sportslab.models.fantasy_model import IntervalCalibrator, fit_ridge, predict_ridge
 
 PROJECTION_COLUMNS = [
+    "game_id",
     "player_id",
     "player",
     "team",
@@ -55,6 +56,7 @@ def project_next_games(
     nxt = fill_missing(eligible_rows(feats[feats["is_next"]]))
     out = nxt[
         [
+            "game_id",
             "player_id",
             "player",
             "team",

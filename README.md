@@ -49,6 +49,9 @@ A Windows scheduled task, **SportsLab daily predictions**, runs both every day a
 `scripts/daily_predictions.cmd` (it catches up when the PC was off; output in
 `logs/daily_predictions.log`). It runs on this PC on purpose: stats.nba.com blocks most cloud IPs.
 
+`scripts/backtest_predictions_log.py` replays 2025-26 through the whole pipeline (in a throwaway
+schema) to check it reproduces the offline validations.
+
 Re-running `record` on the same day adds nothing (the first snapshot of the day wins). Only this
 lab's predictions are stored there; nothing is connected to any other app.
 

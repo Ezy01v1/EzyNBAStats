@@ -71,6 +71,10 @@ SCHEMA_SQL = [
         CHECK (low80 <= low50 AND low50 <= high50 AND high50 <= high80)
     )
     """,
+    # Added 2026-11-04 (after the first snapshot): tip-off time and the fantasy game id, which
+    # lets postponed games be scored. Older rows have NULL here.
+    "ALTER TABLE game_predictions ADD COLUMN IF NOT EXISTS tipoff_at timestamptz",
+    "ALTER TABLE fantasy_predictions ADD COLUMN IF NOT EXISTS game_id text",
 ]
 
 GAME_COLUMNS = [
@@ -83,9 +87,11 @@ GAME_COLUMNS = [
     "neutral_site",
     "p_home",
     "model",
+    "tipoff_at",
 ]
 FANTASY_COLUMNS = [
     "recorded_on",
+    "game_id",
     "player_id",
     "game_date",
     "season",
@@ -144,11 +150,14 @@ def game_prediction_rows(
     params: EloParams,
     season: str,
     recorded_on: date,
+    now: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """Unplayed games on or after ``recorded_on`` with the current Elo probability."""
-    pending = schedule[
-        ~schedule["played"] & (schedule["game_date"].dt.date >= recorded_on)
-    ].reset_index(drop=True)
+    """Unplayed games on or after ``recorded_on`` that have not tipped off, with their Elo
+    probability. A game already in progress is left out: its prediction would not be pre-game.
+    """
+    keep = ~schedule["played"] & (schedule["game_date"].dt.date >= recorded_on)
+    keep &= ~started(schedule, now)
+    pending = schedule[keep].reset_index(drop=True)
     if pending.empty:
         return pd.DataFrame(columns=GAME_COLUMNS)
     out = add_probabilities(pending, ratings, params.home_advantage)
@@ -156,16 +165,36 @@ def game_prediction_rows(
     out["season"] = season
     out["game_date"] = out["game_date"].dt.date
     out["model"] = elo_label(params)
+    out["tipoff_at"] = _tipoffs(out)
     return out[GAME_COLUMNS]
 
 
+def _tipoffs(schedule: pd.DataFrame) -> pd.Series:
+    if "tipoff_utc" not in schedule:
+        return pd.Series(pd.NaT, index=schedule.index, dtype="datetime64[us, UTC]")
+    return pd.to_datetime(schedule["tipoff_utc"], utc=True)
+
+
+def started(schedule: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.Series:
+    """True for games whose tip-off time has passed (False when the time is unknown)."""
+    now = now if now is not None else pd.Timestamp.now(tz="UTC")
+    return (_tipoffs(schedule) <= now).fillna(False).astype(bool)
+
+
 def fantasy_prediction_rows(
-    projections: pd.DataFrame, season: str, recorded_on: date, model: str = FANTASY_MODEL
+    projections: pd.DataFrame,
+    season: str,
+    recorded_on: date,
+    model: str = FANTASY_MODEL,
+    started_games: set[str] | None = None,
 ) -> pd.DataFrame:
-    """Projection rows for games on or after ``recorded_on`` (``project_next_games`` output)."""
+    """Projection rows for games on or after ``recorded_on`` (``project_next_games`` output),
+    leaving out the games in ``started_games`` (ids of games already in progress)."""
     out = projections.copy()
     out["game_date"] = pd.to_datetime(out["game_date"]).dt.date
     out = out[out["game_date"] >= recorded_on]
+    if started_games:
+        out = out[~out["game_id"].isin(started_games)]
     out["recorded_on"] = recorded_on
     out["season"] = season
     out["model"] = model
@@ -213,9 +242,12 @@ def record_fantasy_predictions(conn, rows: pd.DataFrame) -> int:
 
 
 def score_games(conn, schedule: pd.DataFrame) -> int:
-    """Fill the final score of every recorded game that has been played since."""
-    pending = _pending_dates(conn, "game_predictions", "home_pts")
-    played = schedule[schedule["played"] & schedule["game_date"].dt.date.isin(pending)]
+    """Fill the final score of every recorded game that has been played since.
+
+    Matched by game id, so a game that was postponed to another date is still scored.
+    """
+    pending = _pending_values(conn, "game_predictions", "game_id", "home_pts")
+    played = schedule[schedule["played"] & schedule["game_id"].isin(pending)]
     if played.empty:
         return _scored(conn, "game_predictions", "home_pts")
     params = _records(played[["home_pts", "away_pts", "game_id"]])
@@ -232,27 +264,48 @@ def score_games(conn, schedule: pd.DataFrame) -> int:
 
 
 def score_fantasy(conn, player_games: pd.DataFrame) -> int:
-    """Fill the actual fantasy points of every recorded player game that has been played."""
+    """Fill the actual fantasy points of every recorded player game that has been played.
+
+    Matched by (player, game id); rows recorded before the game id was stored fall back to
+    (player, date). A player who did not play stays unscored (projections are "if he plays").
+    """
     games = player_games.assign(game_date=pd.to_datetime(player_games["game_date"]).dt.date)
-    games = games[games["game_date"].isin(_pending_dates(conn, "fantasy_predictions", "actual"))]
-    if games.empty:
-        return _scored(conn, "fantasy_predictions", "actual")
-    params = _records(games[["fantasy", "minutes", "player_id", "game_date"]])
+    by_id = games[
+        games["game_id"].isin(_pending_values(conn, "fantasy_predictions", "game_id", "actual"))
+    ]
+    by_date = games[games["game_date"].isin(_pending_dates_without_id(conn))]
     with conn.cursor() as cur:
-        cur.executemany(
-            "UPDATE fantasy_predictions SET actual = %s, minutes = %s, scored_at = now() "
-            "WHERE player_id = %s AND game_date = %s AND actual IS NULL",
-            params,
-        )
-        cur.execute("SELECT count(*) FROM fantasy_predictions WHERE actual IS NOT NULL")
-        scored = cur.fetchone()[0]
+        if not by_id.empty:
+            cur.executemany(
+                "UPDATE fantasy_predictions SET actual = %s, minutes = %s, scored_at = now() "
+                "WHERE player_id = %s AND game_id = %s AND actual IS NULL",
+                _records(by_id[["fantasy", "minutes", "player_id", "game_id"]]),
+            )
+        if not by_date.empty:
+            cur.executemany(
+                "UPDATE fantasy_predictions SET actual = %s, minutes = %s, scored_at = now() "
+                "WHERE player_id = %s AND game_date = %s AND game_id IS NULL AND actual IS NULL",
+                _records(by_date[["fantasy", "minutes", "player_id", "game_date"]]),
+            )
     conn.commit()
-    return scored
+    return _scored(conn, "fantasy_predictions", "actual")
 
 
-def _pending_dates(conn, table: str, result_column: str) -> set[date]:
+def _pending_values(conn, table: str, column: str, result_column: str) -> set:
     with conn.cursor() as cur:
-        cur.execute(f"SELECT DISTINCT game_date FROM {table} WHERE {result_column} IS NULL")
+        cur.execute(
+            f"SELECT DISTINCT {column} FROM {table} "
+            f"WHERE {result_column} IS NULL AND {column} IS NOT NULL"
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
+def _pending_dates_without_id(conn) -> set[date]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT game_date FROM fantasy_predictions "
+            "WHERE actual IS NULL AND game_id IS NULL"
+        )
         return {row[0] for row in cur.fetchall()}
 
 

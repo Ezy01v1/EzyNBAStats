@@ -17,6 +17,7 @@ SCHEDULE_COLUMNS = [
     "home_pts",
     "away_pts",
     "neutral_site",
+    "tipoff_utc",
 ]
 FINISHED = 3  # gameStatus: 1 = scheduled, 2 = live, 3 = final
 REGULAR_SEASON_PREFIX = "002"  # game ids: 001 preseason, 002 regular season, 004 playoffs...
@@ -35,6 +36,12 @@ def clean_schedule(raw: pd.DataFrame) -> pd.DataFrame:
             "home_pts": reg["homeTeam_score"].to_numpy(),
             "away_pts": reg["awayTeam_score"].to_numpy(),
             "neutral_site": reg["isNeutral"].astype(bool).to_numpy(),
+            # Tip-off time (UTC); missing in old payloads and for games without a set time
+            "tipoff_utc": (
+                pd.to_datetime(reg["gameDateTimeUTC"], utc=True, errors="coerce").to_numpy()
+                if "gameDateTimeUTC" in reg
+                else pd.NaT
+            ),
         }
     )
     if out["game_id"].duplicated().any():
