@@ -152,9 +152,11 @@ def append_next_games(
     pending = schedule[~schedule["played"]].sort_values(["game_date", "game_id"])
     abbr = games.drop_duplicates("team_id").set_index("team_id")["team"]
     rows = []
-    for team_id, team_games in games[
-        games["game_date"] >= since - pd.Timedelta(days=active_days)
-    ].groupby("team_id"):
+    recent = games[games["game_date"] >= since - pd.Timedelta(days=active_days)]
+    # A traded player belongs to his latest team only (not to both teams of the window)
+    latest = recent.sort_values(["game_date", "game_id"]).groupby("player_id")["team_id"].last()
+    recent = recent[recent["team_id"] == recent["player_id"].map(latest)]
+    for team_id, team_games in recent.groupby("team_id"):
         nxt = pending[(pending["home_team_id"] == team_id) | (pending["away_team_id"] == team_id)]
         if nxt.empty:
             continue

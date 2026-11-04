@@ -153,3 +153,28 @@ def test_next_game_placeholders_use_the_schedule_and_never_leak_their_own_score(
     assert row["season_mean"] == pytest.approx(played["fantasy"].mean())
     stale = append_next_games(games, schedule, since=last + pd.Timedelta(days=60))
     assert not stale["is_next"].any()  # nobody played recently: no one is projected
+
+
+def test_a_traded_player_is_projected_only_for_his_new_team():
+    games = _games(n_games=20).assign(
+        team_id=lambda d: np.where(d["team"] == "AAA", 1, 2),
+        player=lambda d: d["player_id"].astype(str),
+    )
+    last = games["game_date"].max()
+    # player 0 moves from AAA (team 1) to BBB (team 2) for the last game of the window
+    moved = (games["player_id"] == 0) & (games["game_date"] == last)
+    games.loc[moved, ["team", "team_id", "opponent"]] = ["BBB", 2, "AAA"]
+    schedule = pd.DataFrame(
+        {
+            "game_id": ["next-1", "next-2"],
+            "game_date": [last + pd.Timedelta(days=1), last + pd.Timedelta(days=2)],
+            "played": [False, False],
+            "home_team_id": [1, 2],
+            "away_team_id": [3, 4],
+        }
+    )
+    nxt = append_next_games(games, schedule, since=last)
+    nxt = nxt[nxt["is_next"]]
+    assert not nxt.duplicated("player_id").any()
+    traded = nxt[nxt["player_id"] == 0].iloc[0]
+    assert traded["team_id"] == 2 and traded["game_id"] == "next-2"
