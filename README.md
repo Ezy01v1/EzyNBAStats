@@ -51,6 +51,14 @@ A Windows scheduled task, **SportsLab daily predictions**, runs both every day a
 `scripts/daily_predictions.cmd` (it catches up when the PC was off; output in
 `logs/daily_predictions.log`). It runs on this PC on purpose: stats.nba.com blocks most cloud IPs.
 
+After a season ends, shrink it to what the evaluation uses (the latest pre-game prediction of
+each game and model). It exports the season to Parquet in `data/processed/` first, and commits
+only if the evaluation is unchanged; without `--apply` it only reports what it would delete:
+
+```bash
+python -m uv run python scripts/prune_season.py 2026-27
+```
+
 `scripts/backtest_predictions_log.py` replays 2025-26 through the whole pipeline (in a throwaway
 schema) to check it reproduces the offline validations.
 

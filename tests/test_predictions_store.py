@@ -294,3 +294,39 @@ def test_db_two_models_share_a_game_and_old_tables_are_migrated(db):
     by_model = store.evaluate_games_by_model(store.read_game_predictions(db))
     assert set(by_model) == {"elo k=24 ha=40 c=0.7", "logistic-form-rest-v1"}
     assert all(r["n"] == 2 for r in by_model.values())
+
+
+@pytest.mark.network
+def test_db_pruning_a_finished_season_keeps_the_evaluation(db):
+    season = "2025-26"  # finished relative to the current season below
+    for day, now in (
+        (date(2026, 11, 4), NOON_NOV4),
+        (date(2026, 11, 5), pd.Timestamp("2026-11-05 17:00", tz="UTC")),
+    ):
+        rows = _games(day=day, now=now).assign(season=season)
+        store.record_game_predictions(db, rows)
+        store.record_game_predictions(db, rows.assign(model="other", p_home=0.6))
+    fantasy = store.fantasy_prediction_rows(_projections(), season, date(2026, 11, 4))
+    store.record_fantasy_predictions(db, fantasy)
+    store.record_fantasy_predictions(db, fantasy.assign(recorded_on=date(2026, 11, 3)))
+    store.score_games(db, _schedule().assign(played=True, home_pts=[110, 99, 120, 90, 100]))
+    before = store.evaluate_games_by_model(store.read_game_predictions(db))
+
+    counts = store.count_superseded(db, season)
+    assert counts["game_predictions"] == (6, 2)  # g4 was predicted on both days, per model
+    assert counts["fantasy_predictions"] == (4, 2)
+    with pytest.raises(ValueError):
+        store.prune_season(db, "2026-27", current_season="2026-27")
+    assert store.prune_season(db, season, current_season="2026-27") == {
+        "game_predictions": 2,
+        "fantasy_predictions": 2,
+    }
+    db.commit()
+    after = store.evaluate_games_by_model(store.read_game_predictions(db))
+    assert {m: r["log_loss"] for m, r in after.items()} == {
+        m: r["log_loss"] for m, r in before.items()
+    }
+    kept = store.read_game_predictions(db)
+    assert len(kept) == 4 and set(kept[kept["game_id"] == "g4"]["recorded_on"]) == {
+        date(2026, 11, 5)
+    }

@@ -157,3 +157,9 @@ One entry per module: what I learned, what failed, what to improve.
 - **Code:** `models/live_logistic.py` rebuilds the features for unplayed games (rest from the scheduled date, form from finished games only, Elo difference from current ratings); the daily job refits it on every finished game. Neutral-site games are skipped (their "home" is arbitrary), as in Module 2. The key of `game_predictions` became (recorded_on, game_id, model), migrated in place; `compare_models` gives the paired log-loss gain on the games both models predicted.
 - **Result (replay through Neon, fit before the season only):** logistic Brier 0.2064 / log loss 0.5995 vs Elo 0.2084 / 0.6044; paired gain +0.0041 [-0.0016, +0.0097] on 1,225 games. Same answer as Module 2: probably a little better, not proven.
 - **Learning:** one season is not enough to separate them; with ~1,200 games a season the live log will need about two seasons (or the interval to clear 0) before switching models.
+
+## End-of-season pruning (2026-11-05)
+
+- **Why:** each day stores a prediction for every remaining game (~2,200 game rows a day, ~55 MB a season); only the latest pre-game copy of each game is evaluated.
+- **Code:** `scripts/prune_season.py` (dry run by default) keeps the latest row per (game, model) and per (player, date, model), only for finished seasons. With `--apply` it exports the season to Parquet, checks the export, deletes in one transaction and commits only if the evaluation is identical before and after. Expected: ~180k → ~2.4k game rows per season.
+- **Tested:** in a throwaway schema, both the library (counts, refusal of the current season, unchanged log loss) and the whole script with `--apply`.

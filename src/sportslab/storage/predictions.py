@@ -457,3 +457,54 @@ def evaluate_fantasy(predictions: pd.DataFrame) -> dict:
         out[f"coverage{level}"] = cov
         out[f"coverage{level}_95"] = (float(low), float(high))
     return out
+
+
+# --- end-of-season pruning ------------------------------------------------------------------
+
+# Rows kept per key: the latest recorded before the game, i.e. exactly what the evaluation uses.
+PRUNE_KEYS = {
+    "game_predictions": ["game_id", "model"],
+    "fantasy_predictions": ["player_id", "game_date", "model"],
+}
+
+
+def _superseded_sql(table: str) -> str:
+    match = " AND ".join(f"n.{k} = t.{k}" for k in PRUNE_KEYS[table])
+    return (
+        f"FROM {table} t WHERE t.season = %s AND EXISTS ("
+        f"SELECT 1 FROM {table} n WHERE {match} AND n.recorded_on > t.recorded_on)"
+    )
+
+
+def read_season(conn, table: str, season: str) -> pd.DataFrame:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT * FROM {table} WHERE season = %s ORDER BY recorded_on", (season,))
+        cols = [c.name for c in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+
+
+def count_superseded(conn, season: str) -> dict[str, tuple[int, int]]:
+    """Per table: (rows of the season, rows that pruning would delete)."""
+    out = {}
+    with conn.cursor() as cur:
+        for table in PRUNE_KEYS:
+            cur.execute(f"SELECT count(*) FROM {table} WHERE season = %s", (season,))
+            total = cur.fetchone()[0]
+            cur.execute(f"SELECT count(*) {_superseded_sql(table)}", (season,))
+            out[table] = (total, cur.fetchone()[0])
+    return out
+
+
+def prune_season(conn, season: str, current_season: str) -> dict[str, int]:
+    """Delete, for a FINISHED season, every prediction superseded by a later one of the same
+    game (and model). Evaluation results do not change. Refuses the current or a later season.
+    Does NOT commit: the caller checks the result, then commits or rolls back.
+    """
+    if season >= current_season:
+        raise ValueError(f"{season} is not finished (current season is {current_season}).")
+    deleted = {}
+    with conn.cursor() as cur:
+        for table in PRUNE_KEYS:
+            cur.execute(f"DELETE {_superseded_sql(table)}", (season,))
+            deleted[table] = cur.rowcount
+    return deleted
