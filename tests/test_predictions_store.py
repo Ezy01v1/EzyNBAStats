@@ -274,3 +274,23 @@ def test_db_several_missed_days_are_scored_in_one_catch_up_run(db):
     assert store.score_games(db, finished) == 3  # g3 (Nov 4), g4 twice (Nov 4 and Nov 5)
     result = store.evaluate_games(store.read_game_predictions(db))
     assert result["n"] == 2  # one prediction per game: the latest pre-game one
+
+
+@pytest.mark.network
+def test_db_two_models_share_a_game_and_old_tables_are_migrated(db):
+    with db.cursor() as cur:  # recreate the table with the original key (recorded_on, game_id)
+        cur.execute("ALTER TABLE game_predictions DROP CONSTRAINT game_predictions_pkey")
+        cur.execute("ALTER TABLE game_predictions ADD PRIMARY KEY (recorded_on, game_id)")
+    db.commit()
+    store.ensure_schema(db)  # the migration widens the key to include the model
+    store.ensure_schema(db)  # and running it again is harmless
+    elo = _games()
+    other = elo.assign(model="logistic-form-rest-v1", p_home=0.55)
+    assert store.record_game_predictions(db, elo) == 2
+    assert store.record_game_predictions(db, other) == 2
+    assert store.record_game_predictions(db, other) == 0
+    finished = _schedule().assign(played=True, home_pts=[110, 99, 120, 90, 100])
+    assert store.score_games(db, finished) == 4
+    by_model = store.evaluate_games_by_model(store.read_game_predictions(db))
+    assert set(by_model) == {"elo k=24 ha=40 c=0.7", "logistic-form-rest-v1"}
+    assert all(r["n"] == 2 for r in by_model.values())

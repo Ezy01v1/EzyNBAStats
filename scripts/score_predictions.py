@@ -8,12 +8,15 @@ import pandas as pd
 from sportslab.data import NbaClient
 from sportslab.data.gamelog import load_player_games
 from sportslab.data.schedule import load_schedule
-from sportslab.service.context import CURRENT, FRESHNESS
+from sportslab.models.live_logistic import LOGISTIC_MODEL
+from sportslab.service.context import CURRENT, FRESHNESS, TUNED_ELO
 from sportslab.storage.predictions import (
+    compare_models,
     connect,
+    elo_label,
     ensure_schema,
     evaluate_fantasy,
-    evaluate_games,
+    evaluate_games_by_model,
     read_fantasy_predictions,
     read_game_predictions,
     score_fantasy,
@@ -36,16 +39,24 @@ with connect() as conn:
 print(f"Recorded: {len(games)} game predictions, {len(fantasy)} fantasy projections.")
 print(f"With a result: {scored_games} games, {scored_players} player games.\n")
 
-g = evaluate_games(games)
-if g["n"]:
+for model, g in (evaluate_games_by_model(games) if len(games) else {}).items():
+    if not g["n"]:
+        print(f"Games [{model}]: nothing scored yet.")
+        continue
     lo, hi = g["favorite_won_95"]
     print(
-        f"Games (n={g['n']}): Brier {g['brier']:.3f} (coin 0.250), log loss {g['log_loss']:.3f}, "
-        f"favorite won {g['favorite_won']:.1%} (95% {lo:.1%}-{hi:.1%})"
+        f"Games [{model}] (n={g['n']}): Brier {g['brier']:.3f} (coin 0.250), "
+        f"log loss {g['log_loss']:.3f}, favorite won {g['favorite_won']:.1%} "
+        f"(95% {lo:.1%}-{hi:.1%})"
     )
     print(g["calibration"].to_string(index=False))
-else:
-    print("Games: nothing scored yet.")
+c = compare_models(games, LOGISTIC_MODEL, elo_label(TUNED_ELO)) if len(games) else {"n": 0}
+if c["n"]:
+    lo, hi = c["gain_95"]
+    print(
+        f"\nLogistic vs Elo on the same {c['n']} games: log-loss gain {c['gain']:+.4f} "
+        f"(95% {lo:+.4f} to {hi:+.4f}; positive = logistic better, interval with 0 = a tie)"
+    )
 
 f = evaluate_fantasy(fantasy)
 if f["n"]:

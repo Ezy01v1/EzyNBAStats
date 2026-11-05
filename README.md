@@ -38,7 +38,9 @@ Docs and design limits (localhost only, no auth, connects to nothing else) in
 
 Predictions are frozen in a Postgres database (a dedicated Neon project, `sports-analytics-lab`)
 before the games, then scored against the results: the honest out-of-sample test. Put the
-connection string in a local `.env` (git-ignored; see `.env.example`) and run, once a day:
+connection string in a local `.env` (git-ignored; see `.env.example`) and run, once a day.
+Two game models are recorded side by side (tuned Elo and the Module 2 logistic with form and
+rest), and the scoring script prints their paired comparison:
 
 ```bash
 python -m uv run python scripts/record_predictions.py

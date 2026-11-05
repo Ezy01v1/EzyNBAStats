@@ -48,6 +48,7 @@ class CurrentContext:
     pre_game: pd.DataFrame  # run_elo output: pre-game p_home for every game played so far
     loaded_at: datetime = field(default_factory=datetime.now)
     version: int = 0  # set by DataService on every successful load
+    history: pd.DataFrame | None = None  # finished games of earlier seasons (load_games output)
 
 
 def history_seasons(season: str) -> list[str]:
@@ -62,7 +63,7 @@ def load_context(client: NbaClient, season: str = CURRENT) -> CurrentContext:
     state = build_season_state(history, schedule, conferences, season, TUNED_ELO)
     played = schedule_to_games(schedule, season)
     pre = run_elo(pd.concat([history, played], ignore_index=True), TUNED_ELO)
-    return CurrentContext(season, schedule, conferences, state, pre)
+    return CurrentContext(season, schedule, conferences, state, pre, history=history)
 
 
 class DataService:

@@ -149,3 +149,11 @@ One entry per module: what I learned, what failed, what to improve.
 - **Known limits:** days when the PC is off are not recorded (a prediction cannot be made after the fact without leaking); scoring catches up on the next run. The schema change was applied with `ADD COLUMN IF NOT EXISTS`, so the first 1,099 + 308 rows have NULL tip-off and game id.
 - **Tests:** 9 new (in-progress games, unknown tip-off, catch-up of several days, postponed game, legacy rows, player who did not play, idempotent scoring, trade), the database ones in a throwaway schema.
 
+
+## Second game model in the predictions log (2026-11-04)
+
+- **Concept:** Module 2's logistic regression (Elo difference + form + rest + back-to-backs) beat Elo by +0.0035 log loss with an interval containing 0: undecided. Recording both models every day on the same games turns the live season into a paired comparison on games neither model has seen.
+- **Hypothesis:** on a replay of 2025-26 the logistic should again be slightly better but not distinguishable from Elo.
+- **Code:** `models/live_logistic.py` rebuilds the features for unplayed games (rest from the scheduled date, form from finished games only, Elo difference from current ratings); the daily job refits it on every finished game. Neutral-site games are skipped (their "home" is arbitrary), as in Module 2. The key of `game_predictions` became (recorded_on, game_id, model), migrated in place; `compare_models` gives the paired log-loss gain on the games both models predicted.
+- **Result (replay through Neon, fit before the season only):** logistic Brier 0.2064 / log loss 0.5995 vs Elo 0.2084 / 0.6044; paired gain +0.0041 [-0.0016, +0.0097] on 1,225 games. Same answer as Module 2: probably a little better, not proven.
+- **Learning:** one season is not enough to separate them; with ~1,200 games a season the live log will need about two seasons (or the interval to clear 0) before switching models.

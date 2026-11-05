@@ -20,7 +20,13 @@ import pandas as pd
 from sportslab.analysis.daily import add_probabilities
 from sportslab.models.elo import EloParams
 from sportslab.models.fantasy_model import coverage
-from sportslab.models.metrics import brier_score, calibration_table, log_loss, wilson_interval
+from sportslab.models.metrics import (
+    brier_score,
+    calibration_table,
+    log_loss,
+    paired_log_loss_gain,
+    wilson_interval,
+)
 
 ENV_VAR = "SPORTSLAB_DATABASE_URL"
 ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
@@ -75,6 +81,20 @@ SCHEMA_SQL = [
     # lets postponed games be scored. Older rows have NULL here.
     "ALTER TABLE game_predictions ADD COLUMN IF NOT EXISTS tipoff_at timestamptz",
     "ALTER TABLE fantasy_predictions ADD COLUMN IF NOT EXISTS game_id text",
+    # Added 2026-11-04: several game models side by side, one row per (day, game, model).
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.key_column_usage
+            WHERE table_schema = current_schema() AND table_name = 'game_predictions'
+              AND constraint_name = 'game_predictions_pkey' AND column_name = 'model'
+        ) THEN
+            ALTER TABLE game_predictions DROP CONSTRAINT game_predictions_pkey;
+            ALTER TABLE game_predictions ADD PRIMARY KEY (recorded_on, game_id, model);
+        END IF;
+    END $$
+    """,
 ]
 
 GAME_COLUMNS = [
@@ -155,16 +175,39 @@ def game_prediction_rows(
     """Unplayed games on or after ``recorded_on`` that have not tipped off, with their Elo
     probability. A game already in progress is left out: its prediction would not be pre-game.
     """
-    keep = ~schedule["played"] & (schedule["game_date"].dt.date >= recorded_on)
-    keep &= ~started(schedule, now)
-    pending = schedule[keep].reset_index(drop=True)
+    pending = schedule[pregame(schedule, recorded_on, now)].reset_index(drop=True)
     if pending.empty:
         return pd.DataFrame(columns=GAME_COLUMNS)
     out = add_probabilities(pending, ratings, params.home_advantage)
+    return _game_rows(out, season, recorded_on, elo_label(params))
+
+
+def model_game_rows(
+    predicted: pd.DataFrame,
+    model: str,
+    season: str,
+    recorded_on: date,
+    now: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Rows for any model's ``p_home`` (schedule columns + ``p_home``), same filters as Elo."""
+    out = predicted[pregame(predicted, recorded_on, now)].reset_index(drop=True)
+    if out.empty:
+        return pd.DataFrame(columns=GAME_COLUMNS)
+    return _game_rows(out, season, recorded_on, model)
+
+
+def pregame(schedule: pd.DataFrame, recorded_on: date, now: pd.Timestamp | None = None):
+    """Unplayed games on or after ``recorded_on`` that have not tipped off."""
+    keep = ~schedule["played"] & (pd.to_datetime(schedule["game_date"]).dt.date >= recorded_on)
+    return keep & ~started(schedule, now)
+
+
+def _game_rows(out: pd.DataFrame, season: str, recorded_on: date, model: str) -> pd.DataFrame:
+    out = out.copy()
     out["recorded_on"] = recorded_on
     out["season"] = season
-    out["game_date"] = out["game_date"].dt.date
-    out["model"] = elo_label(params)
+    out["game_date"] = pd.to_datetime(out["game_date"]).dt.date
+    out["model"] = model
     out["tipoff_at"] = _tipoffs(out)
     return out[GAME_COLUMNS]
 
@@ -234,7 +277,7 @@ def _count(cur, table: str) -> int:
 
 
 def record_game_predictions(conn, rows: pd.DataFrame) -> int:
-    return _insert(conn, "game_predictions", rows, "recorded_on, game_id")
+    return _insert(conn, "game_predictions", rows, "recorded_on, game_id, model")
 
 
 def record_fantasy_predictions(conn, rows: pd.DataFrame) -> int:
@@ -344,10 +387,17 @@ def latest_before_game(predictions: pd.DataFrame, keys: list[str]) -> pd.DataFra
     return ordered.drop_duplicates(keys, keep="last").reset_index(drop=True)
 
 
-def evaluate_games(predictions: pd.DataFrame) -> dict:
-    """Brier, log loss and calibration of the latest pre-game probability of each scored game."""
+def _scored_games(predictions: pd.DataFrame) -> pd.DataFrame:
     scored = predictions.dropna(subset=["home_pts", "away_pts"])
-    scored = latest_before_game(scored, ["game_id"])
+    keys = ["model", "game_id"] if "model" in scored else ["game_id"]
+    return latest_before_game(scored, keys)
+
+
+def evaluate_games(predictions: pd.DataFrame) -> dict:
+    """Brier, log loss and calibration of the latest pre-game probability of each scored game.
+
+    Pass one model's rows (see ``evaluate_games_by_model``)."""
+    scored = _scored_games(predictions)
     n = len(scored)
     if n == 0:
         return {"n": 0}
@@ -365,6 +415,26 @@ def evaluate_games(predictions: pd.DataFrame) -> dict:
         "home_win_rate": float(y.mean()),
         "calibration": calibration_table(y, p, n_bins=5),
     }
+
+
+def evaluate_games_by_model(predictions: pd.DataFrame) -> dict[str, dict]:
+    return {m: evaluate_games(rows) for m, rows in predictions.groupby("model")}
+
+
+def compare_models(predictions: pd.DataFrame, model: str, baseline: str) -> dict:
+    """Paired log-loss gain of ``model`` over ``baseline`` on the scored games both predicted
+    (positive = ``model`` better), with a 95% interval."""
+    scored = _scored_games(predictions)
+    wide = scored.pivot(index="game_id", columns="model", values="p_home")
+    if model not in wide or baseline not in wide:
+        return {"n": 0}
+    wide = wide[[model, baseline]].dropna()
+    if wide.empty:
+        return {"n": 0}
+    result = scored.drop_duplicates("game_id").set_index("game_id").loc[wide.index]
+    y = (result["home_pts"].astype(float) > result["away_pts"].astype(float)).to_numpy(float)
+    gain, low, high = paired_log_loss_gain(y, wide[model].to_numpy(), wide[baseline].to_numpy())
+    return {"n": len(wide), "gain": float(gain), "gain_95": (float(low), float(high))}
 
 
 def evaluate_fantasy(predictions: pd.DataFrame) -> dict:
